@@ -1,0 +1,17 @@
+# The file you edit — local paths must never reach version control.
+# Created from config.example.yaml by setup_colab.sh.
+config.yaml
+
+results/
+.venvs/
+
+# Held-out images are fetched from assets/heldout/manifest.json, not committed.
+assets/heldout/*.jpg
+assets/heldout/*.jpeg
+assets/heldout/*.png
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.ipynb_checkpoints/

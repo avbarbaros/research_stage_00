@@ -1,0 +1,7 @@
+# Stage 0.2 — ISOLATED VENV ONLY. Never install into the base environment.
+# See requirements/harness_vlmevalkit.txt for the rationale.
+#
+#   python -m venv .venvs/lmms_eval
+#   .venvs/lmms_eval/bin/pip install -r requirements/harness_lmms_eval.txt
+
+lmms-eval

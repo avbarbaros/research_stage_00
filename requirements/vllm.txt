@@ -1,0 +1,9 @@
+# Stage 0.1 — ISOLATED VENV ONLY. Never install into the base environment.
+#
+# vLLM pins its own torch build and will clobber Colab's preinstalled
+# torch/torchvision, breaking the transformers correctness path that stage 0
+# exists to establish.
+#
+#   python -m venv .venvs/vllm && .venvs/vllm/bin/pip install -r requirements/vllm.txt
+
+vllm>=0.8

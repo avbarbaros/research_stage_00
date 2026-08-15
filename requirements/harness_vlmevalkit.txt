@@ -1,0 +1,9 @@
+# Stage 0.2 — ISOLATED VENV ONLY. Never install into the base environment.
+#
+# VLMEvalKit and lmms-eval pin conflicting dependencies; each gets its own venv
+# and the backends shell out, so the pins never meet.
+#
+#   python -m venv .venvs/vlmevalkit
+#   .venvs/vlmevalkit/bin/pip install -r requirements/harness_vlmevalkit.txt
+
+vlmeval

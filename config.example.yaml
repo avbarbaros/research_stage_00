@@ -20,12 +20,12 @@ paths:
   # local: cache on local disk; re-downloads each session, no staging copy.
   cache_mode: drive
 
-  hf_home: /content/drive/MyDrive/mmro/hf_cache   # used when cache_mode: drive
-  local_hf_home: /content/hf_cache                # used when cache_mode: local
+  hf_home: /content/drive/MyDrive/MMRM/hf_cache   # used when cache_mode: drive
+  local_hf_home: /content/MMRM/hf_cache           # used when cache_mode: local
 
   # Weights are staged here before loading when cache_mode is drive. Drive is a
   # FUSE mount; mmap-ing multi-shard safetensors across it is slow and stalls.
-  stage_dir: /content/models
+  stage_dir: /content/MMRM/models
 
   # Relative paths resolve against the repo root.
   images_dir: assets/heldout

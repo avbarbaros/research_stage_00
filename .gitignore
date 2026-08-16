@@ -5,11 +5,6 @@ config.yaml
 results/
 .venvs/
 
-# Held-out images are fetched from assets/heldout/manifest.json, not committed.
-assets/heldout/*.jpg
-assets/heldout/*.jpeg
-assets/heldout/*.png
-
 __pycache__/
 *.py[cod]
 .pytest_cache/

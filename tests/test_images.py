@@ -12,7 +12,6 @@ import pytest
 from PIL import Image
 
 from mmro.images import (
-    ADVISORY_MIN_LONG_SIDE,
     ImageSetError,
     advisories,
     discover,
@@ -21,6 +20,7 @@ from mmro.images import (
     require,
     sha256_file,
     sizes_of,
+    undersized,
 )
 
 
@@ -120,14 +120,14 @@ def test_low_resolution_images_are_flagged_not_rejected(tmp_path):
     d = tmp_path / "small"
     make_image(d / "01_small.jpg", width=640, height=480)
     images = discover(d)          # still usable
-    notes = advisories(images)
+    notes = advisories(images, 2048)
     assert len(notes) == 1
-    assert "high-resolution" in notes[0]
+    assert "below the 2048px floor" in notes[0]
 
 
 def test_high_resolution_images_produce_no_advisory(image_dir):
-    big = [i for i in discover(image_dir) if i.long_side >= ADVISORY_MIN_LONG_SIDE]
-    assert advisories(big) == []
+    big = [i for i in discover(image_dir) if i.long_side >= 2048]
+    assert advisories(big, 2048) == []
 
 
 # --- helpers feeding budget.py and the records -----------------------------
@@ -152,3 +152,28 @@ def test_provenance_carries_name_size_and_hash(image_dir):
 def test_provenance_distinguishes_different_images(image_dir):
     entries = provenance(discover(image_dir))
     assert len({e.split(":")[2] for e in entries}) == 3
+
+
+# --- resolution floor (configurable) ---------------------------------------
+def test_undersized_uses_the_configured_floor(tmp_path):
+    d = tmp_path / "mixed"
+    make_image(d / "01_big.jpg", width=3840, height=2160)
+    make_image(d / "02_small.jpg", width=960, height=1139)
+    images = discover(d)
+    assert [i.name for i in undersized(images, 2048)] == ["02_small.jpg"]
+    # Lowering the floor is a legitimate choice and must actually take effect.
+    assert undersized(images, 512) == []
+
+
+def test_advisory_names_the_rung_that_stops_binding(tmp_path):
+    d = tmp_path / "small"
+    make_image(d / "01.jpg", width=960, height=1139)
+    note = advisories(discover(d), 2048)[0]
+    assert "1.09 MP" in note
+    assert "images.min_long_side" in note
+    assert "will not bind" in note
+
+
+def test_no_advisory_for_a_4k_set(image_dir):
+    big = [i for i in discover(image_dir) if i.long_side >= 2048]
+    assert advisories(big, 2048) == []

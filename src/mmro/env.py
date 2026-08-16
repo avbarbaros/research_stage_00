@@ -55,7 +55,9 @@ def apply_env(cfg: Config) -> Path:
 
     os.environ["HF_HOME"] = str(hf_home)
     os.environ["HF_HUB_CACHE"] = str(hf_home / "hub")
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+    # huggingface_hub replaced hf_transfer with Xet; setting the old variable now
+    # only produces a deprecation warning on every import.
+    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     # Fragmentation is the practical VRAM limit during a sweep on a 24GB card;
     # expandable segments meaningfully reduce it.
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")

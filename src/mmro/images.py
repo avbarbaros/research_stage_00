@@ -24,9 +24,8 @@ from pathlib import Path
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
-# Advisory only. Stage 0 is a high-resolution test; a small image still runs but
-# is not evidence of anything, so it is called out rather than silently used.
-ADVISORY_MIN_LONG_SIDE = 1024
+# Fallback only; the real threshold is images.min_long_side in config.yaml.
+DEFAULT_MIN_LONG_SIDE = 2048
 
 
 class ImageSetError(Exception):
@@ -122,16 +121,29 @@ def require(images_dir: Path, count: int) -> list[HeldOutImage]:
     return images[:count]
 
 
-def advisories(images: list[HeldOutImage]) -> list[str]:
-    """Non-fatal notes about an image set's suitability for a high-res test."""
+def undersized(
+    images: list[HeldOutImage], min_long_side: int = DEFAULT_MIN_LONG_SIDE
+) -> list[HeldOutImage]:
+    return [i for i in images if i.long_side < min_long_side]
+
+
+def advisories(
+    images: list[HeldOutImage], min_long_side: int = DEFAULT_MIN_LONG_SIDE
+) -> list[str]:
+    """Notes about an image set's suitability for a high-resolution test.
+
+    Small images do not merely weaken the result, they invert it: once an image
+    is smaller than a rung's budget, the rung stops binding and the sweep
+    reports a boundary it never actually tested.
+    """
     notes = []
-    for img in images:
-        if img.long_side < ADVISORY_MIN_LONG_SIDE:
-            notes.append(
-                f"{img.name} is only {img.width}x{img.height}; stage 0 is a "
-                f"high-resolution test, so this image will not exercise the "
-                f"budget ladder meaningfully"
-            )
+    for img in undersized(images, min_long_side):
+        notes.append(
+            f"{img.name} is {img.width}x{img.height} ({img.megapixels:.2f} MP), "
+            f"below the {min_long_side}px floor in images.min_long_side — "
+            f"budget rungs above ~{img.megapixels * 1e6 / 784:.0f} visual tokens "
+            f"will not bind for it"
+        )
     return notes
 
 
@@ -179,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{img.megapixels:>5.1f} MP  {img.sha256[:12]}"
         )
 
-    for note in advisories(images):
+    for note in advisories(images, cfg.images.min_long_side):
         print(f"\nnote: {note}")
 
     needed = max([*cfg.smoke.image_counts, *cfg.sweep.image_counts])

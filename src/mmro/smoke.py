@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .budget import estimate_visual_tokens
 from .config import Config, ConfigError, load_config
-from .images import ImageSetError, provenance, require, sizes_of
+from .images import ImageSetError, advisories, provenance, require, sizes_of
 from .records import GenerationResult, append_jsonl
 
 
@@ -36,7 +36,18 @@ def run_model(cfg: Config, model_name: str, out_path: Path) -> list[GenerationRe
     # Fail before loading 16.5GB of weights if the image set cannot satisfy the
     # largest requested count.
     largest = max(counts)
-    require(cfg.paths.images_path, largest)
+    largest_set = require(cfg.paths.images_path, largest)
+
+    # Surfaced here, not just in `mmro.images`: a caption from a 0.07 MP image
+    # proves the plumbing works and nothing about high-resolution behaviour.
+    notes = advisories(largest_set, cfg.images.min_long_side)
+    for note in notes:
+        print(f"NOTE: {note}")
+    if notes:
+        print(
+            "NOTE: this run tests the pipeline, not resolution limits — "
+            "the sweep needs a larger image set to measure a real boundary\n"
+        )
 
     print(f"loading {model_name} ({model_cfg.repo_id}) ...")
     adapter = load_adapter(cfg, model_name)

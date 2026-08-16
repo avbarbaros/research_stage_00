@@ -79,6 +79,10 @@ Copy them into `paths.images_dir` yourself; see
 order, so put a dense-text or multi-object image first — those make a broken
 vision path visible, where an open scene invites plausible confabulation.
 
+**Use 4K+ originals.** `images.min_long_side` (default 2048) is enforced: below
+it, budget rungs stop binding and the sweep would report a boundary it never
+tested. `01_smoke.sh` warns; `02_sweep.sh` refuses without `--allow-small-images`.
+
 ## What the sweep measures, and why
 
 "Full resolution without OOM" is not a yes/no question on a 24GB L4 — it depends

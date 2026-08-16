@@ -23,12 +23,27 @@ silently broken still produces fluent, plausible captions for an open scene —
 those two kinds make the failure visible, because the caption either quotes the
 text and counts the objects or it does not.
 
-## Resolution
+## Resolution — this is the part that actually matters
 
-Stage 0 measures the OOM boundary at high resolution, so use the largest
-originals you have (≥4K on the long side is ideal). Images under 1024px on the
-long side are flagged as advisory: they still run, but they do not exercise the
-budget ladder and so are not evidence of anything.
+Use the largest originals you have. **4K+ on the long side is the target**;
+`images.min_long_side` in `config.yaml` sets the enforced floor (default 2048).
+
+Small images do not merely weaken the result, they invert it. Once an image is
+smaller than a rung's pixel budget, the rung stops binding: the model sees the
+image at native resolution no matter how high the budget goes. The sweep then
+reports the top of the ladder as "surviving" when nothing was ever tested, and
+that number becomes stage 0.2's token budget.
+
+Concretely, a 960×1139 image saturates at ~1395 visual tokens, so every Qwen
+rung above that measures the same thing — and with ~6GB of VRAM headroom left
+unused, nothing OOMs and the sweep finds no boundary at all.
+
+So:
+
+- `01_smoke.sh` runs on small images but prints a NOTE that it is testing the
+  pipeline, not resolution limits.
+- `02_sweep.sh` **refuses** to run below the floor, unless you pass
+  `--allow-small-images` and accept a boundary that is not a real limit.
 
 ## How many
 

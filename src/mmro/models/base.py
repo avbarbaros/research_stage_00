@@ -191,13 +191,31 @@ class VLMAdapter(ABC):
     def _load_kwargs(self) -> dict[str, Any]:
         """``from_pretrained`` kwargs shared by every adapter."""
         kwargs: dict[str, Any] = {
-            "torch_dtype": self._torch_dtype(),
+            _dtype_kwarg(): self._torch_dtype(),
             "device_map": self.cfg.runtime.device_map,
             "attn_implementation": self.cfg.runtime.attn_implementation,
         }
         if self.model_cfg.trust_remote_code:
             kwargs["trust_remote_code"] = True
         return kwargs
+
+
+def _dtype_kwarg() -> str:
+    """The dtype keyword ``from_pretrained`` expects on the installed transformers.
+
+    Renamed ``torch_dtype`` -> ``dtype`` in 4.56. Version-checked rather than
+    tried-and-caught because ``from_pretrained`` swallows unknown kwargs: passing
+    the wrong name would silently load in float32 and OOM on a 24GB L4, with
+    nothing in the traceback pointing here.
+    """
+    try:
+        from transformers import __version__  # noqa: PLC0415
+
+        parts = __version__.split(".")
+        version = (int(parts[0]), int(parts[1]))
+    except (ImportError, IndexError, ValueError):
+        return "torch_dtype"
+    return "dtype" if version >= (4, 56) else "torch_dtype"
 
 
 def get_adapter_class(adapter: str) -> type[VLMAdapter]:

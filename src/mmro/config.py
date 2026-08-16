@@ -187,6 +187,21 @@ class ModelConfig:
 
 
 @dataclass
+class ImagesConfig:
+    """Constraints on the held-out set.
+
+    Stage 0 is a high-resolution test, so the resolution floor is a real
+    parameter rather than a buried constant: below it, a sweep still runs but
+    measures the images rather than the model.
+    """
+
+    min_long_side: int = 2048
+
+    def __post_init__(self) -> None:
+        _check_int("images.min_long_side", self.min_long_side, minimum=1)
+
+
+@dataclass
 class SmokeConfig:
     prompt: str = "Describe this image in detail."
     multi_image_prompt: str = "Compare these images. What differs between them?"
@@ -317,6 +332,7 @@ class Config:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     decode: DecodeConfig = field(default_factory=DecodeConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
+    images: ImagesConfig = field(default_factory=ImagesConfig)
     smoke: SmokeConfig = field(default_factory=SmokeConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
@@ -525,6 +541,7 @@ def load_config(
         runtime=_build(RuntimeConfig, raw.get("runtime", {}), "runtime"),
         decode=_build(DecodeConfig, raw.get("decode", {}), "decode"),
         models=models,
+        images=_build(ImagesConfig, raw.get("images", {}), "images"),
         smoke=_build(SmokeConfig, raw.get("smoke", {}), "smoke"),
         sweep=_build(SweepConfig, raw.get("sweep", {}), "sweep"),
         eval=_build_eval(raw.get("eval", {})),

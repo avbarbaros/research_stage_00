@@ -28,7 +28,7 @@ from pathlib import Path
 
 from .budget import budget_at_rung, distinct_rungs, estimate_visual_tokens, ladder_for
 from .config import Config, ConfigError, load_config
-from .images import ImageSetError, provenance, require, sizes_of
+from .images import ImageSetError, advisories, provenance, require, sizes_of, undersized
 from .records import GenerationResult, append_jsonl, read_jsonl
 
 
@@ -170,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--model", default=None, help="sweep one model (default: all enabled)")
+    parser.add_argument(
+        "--allow-small-images", action="store_true",
+        help="sweep even when images are below images.min_long_side; the reported "
+             "boundary will not be a real limit",
+    )
     parser.add_argument("--cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--images", type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--rung", type=int, default=0, help=argparse.SUPPRESS)
@@ -205,9 +210,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        require(cfg.paths.images_path, max(cfg.sweep.image_counts))
+        images = require(cfg.paths.images_path, max(cfg.sweep.image_counts))
     except ImageSetError as exc:
         print(f"error: {exc}")
+        return 1
+
+    # Refuse rather than produce a boundary that was never tested. Once an image
+    # is smaller than a rung's budget the rung stops binding, so the sweep
+    # reports the top of the ladder as "surviving" when nothing was measured --
+    # and that wrong number becomes stage 0.2's token budget.
+    small = undersized(images, cfg.images.min_long_side)
+    if small and not args.allow_small_images:
+        print("error: the held-out set is too small to measure an OOM boundary.\n")
+        for note in advisories(images, cfg.images.min_long_side):
+            print(f"  - {note}")
+        print(
+            f"\n{len(small)}/{len(images)} image(s) are below the "
+            f"{cfg.images.min_long_side}px floor (images.min_long_side).\n"
+            f"Replace them with 4K+ originals, lower images.min_long_side if you\n"
+            f"have a reason to, or pass --allow-small-images to sweep anyway and\n"
+            f"accept that the reported boundary is not a real limit."
+        )
         return 1
 
     all_results: list[GenerationResult] = []

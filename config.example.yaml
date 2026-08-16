@@ -82,6 +82,15 @@ models:
       max_tiles: 6
       use_thumbnail: true
 
+# Constraints on the held-out set in paths.images_dir.
+images:
+  # Stage 0 measures where high-resolution input breaks. Below this floor the
+  # images, not the model, become the limit: the sweep's top rungs stop binding
+  # and it reports a "boundary" that was never actually tested. 02_sweep.sh
+  # refuses to run on a set below this unless you pass --allow-small-images.
+  # 2048 is a floor, not a target -- prefer 4K+ originals.
+  min_long_side: 2048
+
 smoke:
   prompt: "Describe this image in detail."
   multi_image_prompt: "Compare these images. What differs between them?"

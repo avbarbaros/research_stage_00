@@ -148,8 +148,19 @@ def sweep_section(cfg: Config, results: list[GenerationResult]) -> list[str]:
         "order — especially for multi-image cells.",
         "",
     ]
-    for (model, n_images), r in sorted(found.items()):
-        lines.append(f"**{model} — {n_images} image(s) @ rung {r.rung} ({r.visual_tokens} tok)**")
+    # Every successful rung, not just the boundary. With --all-rungs this becomes
+    # a quality ladder: read down it to find where the model stops tracking its
+    # inputs, which can be far below where it stops fitting in memory.
+    successes = sorted(
+        (r for r in results if r.ok),
+        key=lambda r: (r.model, r.n_images, -(r.rung or 0)),
+    )
+    for r in successes:
+        marker = " — **boundary**" if found.get((r.model, r.n_images)) is r else ""
+        lines.append(
+            f"**{r.model} — {r.n_images} image(s) @ rung {r.rung} "
+            f"({r.visual_tokens} tok){marker}**"
+        )
         lines.append("")
         lines.append(f"Images: `{', '.join(r.images)}`")
         lines.append("")

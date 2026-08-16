@@ -29,7 +29,7 @@ from pathlib import Path
 from .budget import budget_at_rung, distinct_rungs, estimate_visual_tokens, ladder_for
 from .config import Config, ConfigError, load_config
 from .images import ImageSetError, advisories, provenance, require, sizes_of, undersized
-from .records import GenerationResult, append_jsonl, read_jsonl
+from .records import GenerationResult, append_jsonl
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def sweep_model(cfg: Config, model_name: str, args_ns, out_path: Path) -> list[G
                 f"images ({estimate} visual tokens)"
             )
 
-        for rung, _estimate in rungs:
+        for rung, _ in rungs:
             print(f"  rung {rung} ... ", end="", flush=True)
             proc = subprocess.run(
                 _cell_command(args_ns, model_name, n_images, rung),
@@ -107,6 +107,12 @@ def sweep_model(cfg: Config, model_name: str, args_ns, out_path: Path) -> list[G
             results.append(result)
 
             if result.ok:
+                if args_ns.all_rungs:
+                    print(
+                        f"OK  ({result.visual_tokens} visual tokens, "
+                        f"peak {result.peak_vram_gb:.2f} GB)"
+                    )
+                    continue
                 print(
                     f"OK  ({result.visual_tokens} visual tokens, "
                     f"peak {result.peak_vram_gb:.2f} GB) -- boundary for "
@@ -198,6 +204,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--model", default=None, help="sweep one model (default: all enabled)")
+    parser.add_argument(
+        "--all-rungs", action="store_true",
+        help="run every rung instead of stopping at the first success. Use this to "
+             "probe QUALITY rather than VRAM: fitting in memory is not the same as "
+             "still understanding the images, and the answer-quality limit can sit "
+             "far below the OOM limit. Read the captions in the report.",
+    )
     parser.add_argument(
         "--allow-small-images", action="store_true",
         help="sweep even when images are below images.min_long_side; the reported "

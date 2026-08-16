@@ -200,18 +200,17 @@ def test_rungs_can_collapse_for_a_given_aspect_ratio():
 def test_distinct_rungs_drops_duplicates_keeping_the_highest():
     cfg = load_config(EXAMPLE_CONFIG_PATH)
     model = cfg.model("internvl3_8b_hf")
-    kept, skipped = distinct_rungs(
-        model.adapter, model.budget, [(2160, 3840)], cfg.sweep.internvl_tile_ladder
-    )
+    ladder = cfg.sweep.internvl_tile_ladder
+    kept, skipped = distinct_rungs(model.adapter, model.budget, [(2160, 3840)], ladder)
 
     estimates = [e for _, e in kept]
     assert len(set(estimates)) == len(estimates)
     # Highest rung of each duplicate group survives -- same computation, so the
-    # larger number is the honest boundary to report.
-    assert kept[0][0] == 12
-    assert {r for r, _, _ in skipped} == set(cfg.sweep.internvl_tile_ladder) - {
-        r for r, _ in kept
-    }
+    # larger number is the honest boundary to report. Asserted against the
+    # configured ladder rather than a literal, so tuning the ladder in config
+    # does not break the test that guards the dedup behaviour.
+    assert kept[0][0] == max(ladder)
+    assert {r for r, _, _ in skipped} == set(ladder) - {r for r, _ in kept}
     for rung, estimate, kept_rung in skipped:
         assert kept_rung > rung
         assert dict(kept)[kept_rung] == estimate

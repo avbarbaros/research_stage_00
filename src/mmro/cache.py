@@ -104,10 +104,9 @@ def fetch(cfg: Config, model: ModelConfig, force: bool = False) -> FetchResult:
         snapshot_download(
             repo_id=model.repo_id,
             allow_patterns=ALLOW_PATTERNS,
-            resume_download=True,
             max_workers=4,
         )
-    )
+    )  # resuming is the default now; passing resume_download only warns
 
     ok, problems = verify_snapshot(snapshot)
     result = FetchResult(
@@ -149,39 +148,80 @@ def stage_to_local(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if shutil.which("rsync"):
-        # rsync resumes a partial staging copy; a 16GB cp that dies at 90%
-        # otherwise costs the whole transfer again.
+        # -L (--copy-links) is load-bearing, not a nicety. A hub snapshot
+        # directory is a farm of RELATIVE symlinks into ../../blobs/; plain
+        # `rsync -a` copies the links themselves, producing a staged directory
+        # of broken pointers and zero bytes of weights. Loading then silently
+        # falls back to reading 16GB across Drive's FUSE mount at ~44 MB/s --
+        # about six minutes per model instead of thirty seconds.
+        # --partial resumes an interrupted copy rather than restarting 16GB.
         subprocess.run(
-            ["rsync", "-a", "--partial", f"{snapshot}/", f"{target}/"],
+            ["rsync", "-aL", "--partial", f"{snapshot}/", f"{target}/"],
             check=True,
         )
     else:
+        # symlinks=False (the default) likewise dereferences into real files.
         shutil.copytree(snapshot, target, dirs_exist_ok=True)
+
+    ok, problems = verify_snapshot(target)
+    if not ok:
+        raise RuntimeError(
+            f"staging to {target} produced an unusable copy: {'; '.join(problems)}. "
+            f"Loading would fall back to the slow cache. Remove that directory and "
+            f"re-run with --force."
+        )
     return target
 
 
-def local_path(cfg: Config, model: ModelConfig) -> Path:
-    """Where an adapter should load this model from.
+def resolve_load_path(cfg: Config, model: ModelConfig) -> tuple[Path, str, bool]:
+    """Where an adapter will load this model from.
 
-    Prefers the staged local copy, falls back to the HF cache, and finally to
-    the bare repo ID so ``from_pretrained`` can resolve it itself.
+    Returns ``(path, description, is_fast)``. ``is_fast`` is False when we are
+    about to read weights across Drive, which costs minutes per load -- and the
+    sweep reloads for every cell, so it compounds badly.
     """
     staged = cfg.paths.stage_path / model.stage_name
-    if staged.exists() and verify_snapshot(staged)[0]:
-        return staged
+    if staged.exists():
+        ok, problems = verify_snapshot(staged)
+        if ok:
+            return staged, "staged local copy", True
+        detail = "; ".join(problems)
+    else:
+        detail = "not staged"
 
     try:
         from huggingface_hub import snapshot_download  # noqa: PLC0415
 
-        return Path(
+        cached = Path(
             snapshot_download(
                 repo_id=model.repo_id,
                 allow_patterns=ALLOW_PATTERNS,
                 local_files_only=True,
             )
         )
+        return cached, f"HF cache ({detail})", not cfg.paths.caching_on_drive
     except Exception:
-        return Path(model.repo_id)
+        return Path(model.repo_id), f"repo ID, will download ({detail})", False
+
+
+def local_path(cfg: Config, model: ModelConfig, announce: bool = True) -> Path:
+    """Resolve the load path, saying out loud when it is the slow one.
+
+    A silent fallback here is how six minutes of Drive I/O per load hides in
+    plain sight: the model does load, the captions are fine, and nothing
+    indicates that staging failed.
+    """
+    path, description, is_fast = resolve_load_path(cfg, model)
+    if announce and not is_fast:
+        print(
+            f"WARNING: loading {model.name} from {description}: {path}\n"
+            f"         This reads weights across a slow mount (expect minutes, "
+            f"not seconds).\n"
+            f"         Run `bash scripts/00_fetch_weights.sh --force` to stage to "
+            f"{cfg.paths.stage_path} first -- it re-copies from the existing cache "
+            f"and does not re-download."
+        )
+    return path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -195,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--model", default=None, help="fetch one model (default: all enabled)")
     parser.add_argument("--force", action="store_true", help="re-stage even if present")
+    parser.add_argument(
+        "--status", action="store_true",
+        help="report where each model would load from, and how fast, without fetching",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, cli_overrides=args.overrides)
@@ -207,6 +251,23 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("no enabled models in config; nothing to fetch")
         return 1
+
+    if args.status:
+        slow = False
+        for name, model in targets.items():
+            path, description, is_fast = resolve_load_path(cfg, model)
+            print(f"\n{name}:")
+            print(f"  loads from : {path}")
+            print(f"  source     : {description}")
+            print(f"  speed      : {'fast (local disk)' if is_fast else 'SLOW'}")
+            slow = slow or not is_fast
+        if slow:
+            print(
+                "\nAt least one model would load across a slow mount. Every sweep "
+                "cell reloads,\nso this multiplies: run "
+                "`bash scripts/00_fetch_weights.sh --force` to stage locally."
+            )
+        return 1 if slow else 0
 
     failed = False
     for name, model in targets.items():

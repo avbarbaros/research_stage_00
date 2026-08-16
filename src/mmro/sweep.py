@@ -153,6 +153,34 @@ def _parse_cell_output(proc, model_name: str, n_images: int, rung: int) -> Gener
     )
 
 
+def unbounded_cells(results: list[GenerationResult]) -> dict[tuple[str, int], GenerationResult]:
+    """Cells where the *highest rung attempted* succeeded.
+
+    These are not measurements. If the top of the ladder never OOM'd, the sweep
+    found the top of the ladder -- a number we chose -- rather than the limit of
+    the hardware. Reporting that as a boundary is how a config decision gets
+    laundered into an experimental result.
+
+    The fix is always to raise the ladder in config, or to use larger images
+    when the rungs have stopped binding because the pixels ran out.
+    """
+    attempted: dict[tuple[str, int], int] = {}
+    for result in results:
+        if result.rung is None:
+            continue
+        key = (result.model, result.n_images)
+        attempted[key] = max(attempted.get(key, 0), result.rung)
+
+    out: dict[tuple[str, int], GenerationResult] = {}
+    for result in results:
+        if result.rung is None or not result.ok:
+            continue
+        key = (result.model, result.n_images)
+        if result.rung == attempted[key]:
+            out[key] = result
+    return out
+
+
 def boundaries(results: list[GenerationResult]) -> dict[tuple[str, int], GenerationResult]:
     """The highest surviving rung per (model, image count)."""
     best: dict[tuple[str, int], GenerationResult] = {}
@@ -245,12 +273,36 @@ def main(argv: list[str] | None = None) -> int:
     if not found:
         print("  none -- no cell survived at any rung")
         return 1
+
+    unbounded = unbounded_cells(all_results)
     for (model, n_images), result in sorted(found.items()):
+        mark = "  <- TOP RUNG, not a real limit" if (model, n_images) in unbounded else ""
         print(
             f"  {model:<22} {n_images} image(s): rung {result.rung:<5} "
             f"{result.visual_tokens:>6} visual tokens  "
-            f"peak {result.peak_vram_gb:.2f} GB"
+            f"peak {result.peak_vram_gb:.2f} GB{mark}"
         )
+
+    if unbounded:
+        print(
+            f"\nWARNING: {len(unbounded)} of {len(found)} cell(s) survived at the "
+            f"highest rung attempted.\n"
+            f"Those are NOT boundaries -- the ladder ran out before the hardware "
+            f"did, so what\nwas found is the top of a list we chose. Raise the "
+            f"ladders in config.yaml and re-run:\n"
+        )
+        for (model, n_images), result in sorted(unbounded.items()):
+            headroom = result.peak_vram_gb
+            print(
+                f"  {model} at {n_images} image(s): peaked at {headroom:.2f} GB "
+                f"on {result.visual_tokens:,} visual tokens"
+            )
+        print(
+            "\nIf raising the ladder changes nothing, the images have run out of "
+            "pixels\nbefore the GPU ran out of memory -- use higher-resolution "
+            "originals or more images."
+        )
+        return 1
     return 0
 
 

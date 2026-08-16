@@ -130,3 +130,35 @@ def test_score_records_round_trip(tmp_path):
     # The decode echo has to survive: it is what proves both harnesses ran the
     # same way.
     assert restored.decode["do_sample"] is False
+
+
+def test_score_records_carry_the_visual_budget(tmp_path):
+    # Both harnesses must be pinned to the sweep's measured budget; the record
+    # has to prove it, the same way it proves decoding matched.
+    path = tmp_path / "scores_vlmevalkit.jsonl"
+    record = ScoreRecord(
+        harness="vlmevalkit", model="qwen2_5_vl_7b", task="mmmu_val",
+        harness_task_id="MMMU_DEV_VAL", metric="accuracy", score=0.52,
+        decode={"do_sample": False, "max_new_tokens": 512},
+        budget={"max_visual_tokens_per_image": 8192},
+    )
+    write_jsonl(path, [record])
+    assert read_jsonl(path, ScoreRecord)[0].budget == {"max_visual_tokens_per_image": 8192}
+
+
+def test_conditions_detect_a_mismatched_visual_budget():
+    common = dict(model="m", task="t", harness_task_id="T", metric="acc", score=0.5,
+                  decode={"do_sample": False})
+    a = ScoreRecord(harness="vlmevalkit", budget={"max_tiles": 12}, **common)
+    b = ScoreRecord(harness="lmms_eval", budget={"max_tiles": 6}, **common)
+    # Same decoding, different resolution -> not comparable, and the score gap
+    # would look like a harness difference.
+    assert a.conditions[0] == b.conditions[0]
+    assert a.conditions != b.conditions
+
+
+def test_conditions_match_when_both_are_pinned():
+    common = dict(model="m", task="t", harness_task_id="T", metric="acc", score=0.5,
+                  decode={"do_sample": False}, budget={"max_tiles": 12})
+    assert (ScoreRecord(harness="vlmevalkit", **common).conditions
+            == ScoreRecord(harness="lmms_eval", **common).conditions)

@@ -79,10 +79,25 @@ class ScoreRecord:
     metric: str
     score: float
     n_samples: int = 0
-    # Echoed back to prove both harnesses decoded identically. Comparing scores
-    # produced under different decoding settings would be meaningless.
+    # Echoed back to prove both harnesses ran under identical conditions.
+    # Comparing scores produced under different settings measures our config
+    # rather than the harnesses.
     decode: dict[str, Any] = field(default_factory=dict)
+    # The visual budget matters as much as decoding and is far easier to get
+    # wrong, because each harness has its own default. One side running at 12
+    # tiles and the other at 6 produces a score gap that looks like a harness
+    # difference and is really a resolution difference. This comes from the
+    # sweep's measured boundary, and both harnesses must be pinned to it.
+    budget: dict[str, Any] = field(default_factory=dict)
     raw_path: str = ""
+
+    @property
+    def conditions(self) -> tuple:
+        """Everything that must match for two scores to be comparable."""
+        return (
+            tuple(sorted(self.decode.items())),
+            tuple(sorted(self.budget.items())),
+        )
 
 
 # ---------------------------------------------------------------------------

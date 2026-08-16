@@ -97,12 +97,42 @@ smoke:
   image_counts: [1, 3]
 
 sweep:
+  # Budget for the WORST case a benchmark contains, not the average. MMMU's
+  # schema allows up to 7 images in one question; most items have one, but the
+  # single 7-image item is what OOMs an otherwise finished run. Consider
+  # [1, 2, 4, 7] before stage 0.2 -- each extra count costs a full ladder walk,
+  # so it is a deliberate trade rather than a free default.
   image_counts: [1, 2, 3, 4]
   max_new_tokens: 64               # overrides decode.max_new_tokens
-  # Descending ladders, walked until a run survives. The highest surviving
-  # rung is the measured OOM boundary for that model at that image count.
-  qwen_visual_token_ladder: [4096, 2560, 1280, 640, 320]
-  internvl_tile_ladder: [12, 8, 6, 4, 2, 1]
+
+  # Descending ladders, walked high to low until a run survives. The highest
+  # surviving rung is the measured boundary for that model at that image count.
+  #
+  # THE TOP RUNG MUST BE HIGH ENOUGH TO OOM. If a cell survives at the top rung,
+  # the sweep found the top of this list -- a number we chose -- not the limit of
+  # the hardware, and it will say so and exit non-zero rather than report it as a
+  # boundary. Raise these until something fails.
+  #
+  # Sizing, from measured L4 data (~15.5GB weights, ~0.21GB per 1k visual tokens,
+  # so ~33k tokens to exhaust 22.5GB usable): at 4 images that needs ~8k tokens
+  # per image, which is why the top rung is 10240 and not 4096.
+  #
+  # A rung above the image's native token count does nothing -- a 4K image is
+  # ~10,550 tokens, so rungs beyond that stop binding. Going higher only helps
+  # with 8K+ originals.
+  qwen_visual_token_ladder: [10240, 8192, 6144, 4096, 2560, 1280]
+
+  # InternVL tiles: 12 is the model's usual maximum, so rungs above it are
+  # outside its tuned regime and captions may degrade before VRAM does -- which
+  # is itself worth knowing.
+  #
+  # Note this ladder may legitimately never OOM. Tiles are capped by aspect
+  # ratio, so a 16:9 image uses ~28 tiles even when 32 are allowed; reaching the
+  # ~38k tokens an L4 needs would take ~45 tiles per image, which is far outside
+  # anything you would actually run. "No boundary within the usable range" is a
+  # real and useful stage-0 answer -- it means MMMU multi-image fits at full tile
+  # budget -- and the sweep now reports it as such instead of as a boundary.
+  internvl_tile_ladder: [32, 24, 16, 12, 8, 6, 4, 2, 1]
 
 # ----------------------------------------------------------------------------
 # STAGE 0.2. Surface is defined now so the architecture is ready; unused while

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .config import Config, load_config
 from .records import GenerationResult, ScoreRecord, iter_results
-from .sweep import boundaries
+from .sweep import boundaries, unbounded_cells
 
 
 def _fmt(value: float, digits: int = 2) -> str:
@@ -97,13 +97,26 @@ def sweep_section(cfg: Config, results: list[GenerationResult]) -> list[str]:
         "|---|---|---|---|---|---|",
     ]
     found = boundaries(results)
+    unbounded = unbounded_cells(results)
     for (model, n_images), r in sorted(found.items()):
         agrees = {True: "yes", False: "**no**", None: "—"}[r.token_estimate_matches]
+        note = " **(top rung — not a real limit)**" if (model, n_images) in unbounded else ""
         lines.append(
-            f"| {model} | {n_images} | {r.rung} | {r.visual_tokens} | "
+            f"| {model} | {n_images} | {r.rung}{note} | {r.visual_tokens} | "
             f"{_fmt(r.peak_vram_gb)} | {agrees} |"
         )
     lines.append("")
+
+    if unbounded:
+        lines += [
+            f"> **{len(unbounded)} of {len(found)} cell(s) never OOM'd.** They "
+            f"survived at the highest rung attempted, so the ladder ran out before "
+            f"the hardware did — these rows report a value we chose in config, not "
+            f"a measured limit. Raise the ladders in `config.yaml` and re-run; if "
+            f"that changes nothing, the images ran out of pixels first and you need "
+            f"higher-resolution originals.",
+            "",
+        ]
 
     # Cells where nothing survived are the most important thing on the page.
     attempted = {(r.model, r.n_images) for r in results}
@@ -156,14 +169,16 @@ def eval_section(cfg: Config, scores: list[ScoreRecord]) -> list[str]:
         lines.append(f"| {model} | {task} | {metric} | {a_txt} | {b_txt} | {delta} |")
     lines.append("")
 
-    # Decoding must match or the comparison measures the wrong thing.
-    settings = {tuple(sorted(s.decode.items())) for s in scores}
-    if len(settings) > 1:
-        lines += [
-            "> **Warning: not all scores were produced under the same decoding "
-            "settings**, so these numbers are not directly comparable.",
-            "",
-        ]
+    # Decoding AND visual budget must match, or the comparison measures our own
+    # configuration rather than the harnesses.
+    for label, index in (("decoding", 0), ("visual budget", 1)):
+        if len({s.conditions[index] for s in scores}) > 1:
+            lines += [
+                f"> **Warning: not all scores were produced under the same "
+                f"{label}**, so these numbers are not directly comparable. A gap "
+                f"here is our config, not a harness difference.",
+                "",
+            ]
     return lines
 
 

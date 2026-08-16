@@ -10,7 +10,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mmro.records import GenerationResult
-from mmro.sweep import _parse_cell_output, boundaries
+from mmro.sweep import _parse_cell_output, boundaries, unbounded_cells
 
 
 def result(model="m", n=1, rung=1280, ok=True, oom=False, tokens=100):
@@ -130,3 +130,43 @@ def test_sigkill_is_not_recorded_as_a_cuda_oom():
 def test_empty_output_still_produces_a_record():
     parsed = _parse_cell_output(make_proc(returncode=1), "m", 1, 320)
     assert parsed.model == "m" and not parsed.ok
+
+
+# --- "the ladder was too short" detection ----------------------------------
+def test_survival_at_the_top_rung_is_flagged_not_reported_as_a_boundary():
+    # The failure this guards: a sweep that never OOMs reports the top of a list
+    # we chose in config as though it were a hardware limit.
+    results = [result(rung=4096, ok=True, tokens=16000)]
+    assert ("m", 1) in boundaries(results)
+    assert ("m", 1) in unbounded_cells(results)
+
+
+def test_a_real_boundary_is_not_flagged():
+    results = [
+        result(rung=4096, ok=False, oom=True),
+        result(rung=2560, ok=True),
+    ]
+    assert ("m", 1) in boundaries(results)
+    assert unbounded_cells(results) == {}
+
+
+def test_flagging_is_per_cell():
+    # 1 image never OOMs (ladder too short there); 4 images finds a real edge.
+    results = [
+        result(n=1, rung=4096, ok=True),
+        result(n=4, rung=4096, ok=False, oom=True),
+        result(n=4, rung=2560, ok=True),
+    ]
+    flagged = unbounded_cells(results)
+    assert ("m", 1) in flagged
+    assert ("m", 4) not in flagged
+
+
+def test_skipped_rungs_do_not_confuse_the_check():
+    # Deduplication means the top rung ATTEMPTED may be below the ladder top.
+    results = [result(rung=2560, ok=True)]
+    assert ("m", 1) in unbounded_cells(results)
+
+
+def test_failed_top_rung_is_not_flagged():
+    assert unbounded_cells([result(rung=4096, ok=False, oom=True)]) == {}

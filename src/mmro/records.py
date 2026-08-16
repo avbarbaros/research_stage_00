@@ -136,6 +136,21 @@ def read_jsonl(path: Path, cls: type[T]) -> list[T]:
     return out
 
 
+def latest_per_image_count(results: list) -> list:
+    """One result per (model, image count), keeping the most recent.
+
+    Defensive: a results file written before smoke started truncating can hold
+    several runs over different image sets. Comparing across them makes visual
+    tokens appear to shrink as image count grows, which reads as "images are
+    being dropped" when nothing is wrong. JSONL is append-ordered, so the last
+    entry for a key is the current one.
+    """
+    keyed = {}
+    for r in results:
+        keyed[(r.model, r.n_images)] = r
+    return list(keyed.values())
+
+
 def iter_results(results_dir: Path, pattern: str, cls: type[T]) -> Iterator[T]:
     for path in sorted(results_dir.glob(pattern)):
         yield from read_jsonl(path, cls)

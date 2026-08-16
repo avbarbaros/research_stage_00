@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .config import Config, load_config
-from .records import GenerationResult, ScoreRecord, iter_results
+from .records import GenerationResult, ScoreRecord, iter_results, latest_per_image_count
 from .sweep import boundaries, unbounded_cells
 
 
@@ -28,7 +28,17 @@ def smoke_section(cfg: Config, results: list[GenerationResult]) -> list[str]:
     if not results:
         return ["_No smoke results. Run `bash scripts/01_smoke.sh`._", ""]
 
-    lines = [
+    stale = len(results) - len(latest_per_image_count(results))
+    results = latest_per_image_count(results)
+
+    lines = []
+    if stale:
+        lines += [
+            f"_Note: {stale} superseded result(s) from earlier smoke runs were "
+            f"ignored; only the most recent run per image count is shown._",
+            "",
+        ]
+    lines += [
         "| Model | Images | Visual tokens (measured / estimated) | Prompt tok | Peak VRAM (GB) | Gen (s) | Status |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -123,6 +133,27 @@ def sweep_section(cfg: Config, results: list[GenerationResult]) -> list[str]:
     for key in sorted(attempted - set(found)):
         lines.append(f"- **{key[0]} at {key[1]} image(s): no rung survived.**")
     if attempted - set(found):
+        lines.append("")
+
+    # The boundary is a VRAM limit, not a usable limit. A model can fit in memory
+    # and still lose track of its inputs at extreme token counts -- and it is the
+    # boundary settings, not the smoke settings, that stage 0.2 would inherit.
+    # So these captions need reading just as carefully as the smoke ones.
+    lines += [
+        "### Captions at the boundary (read these too)",
+        "",
+        "The rows above are **VRAM** limits. A model can fit in memory and still "
+        "stop tracking its inputs at extreme token counts, so check that the "
+        "caption at each boundary still describes the right images in the right "
+        "order — especially for multi-image cells.",
+        "",
+    ]
+    for (model, n_images), r in sorted(found.items()):
+        lines.append(f"**{model} — {n_images} image(s) @ rung {r.rung} ({r.visual_tokens} tok)**")
+        lines.append("")
+        lines.append(f"Images: `{', '.join(r.images)}`")
+        lines.append("")
+        lines.append("> " + (r.text.strip() or "_(empty)_").replace("\n", "\n> "))
         lines.append("")
 
     lines += ["<details><summary>All attempts</summary>", "",

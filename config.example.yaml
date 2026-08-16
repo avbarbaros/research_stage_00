@@ -120,7 +120,7 @@ sweep:
   # A rung above the image's native token count does nothing -- a 4K image is
   # ~10,550 tokens, so rungs beyond that stop binding. Going higher only helps
   # with 8K+ originals.
-  qwen_visual_token_ladder: [10240, 8192, 6144, 4096, 2560, 1280]
+  qwen_visual_token_ladder: [40960, 20480, 10240, 8192, 6144, 4096, 2560, 1280]
 
   # InternVL tiles: 12 is the model's usual maximum, so rungs above it are
   # outside its tuned regime and captions may degrade before VRAM does -- which
@@ -132,7 +132,7 @@ sweep:
   # anything you would actually run. "No boundary within the usable range" is a
   # real and useful stage-0 answer -- it means MMMU multi-image fits at full tile
   # budget -- and the sweep now reports it as such instead of as a boundary.
-  internvl_tile_ladder: [32, 24, 16, 12, 8, 6, 4, 2, 1]
+  internvl_tile_ladder: [256, 128, 72, 64, 48, 40, 32, 24, 16, 12, 8, 6, 4, 2, 1]
 
 # ----------------------------------------------------------------------------
 # STAGE 0.2. Surface is defined now so the architecture is ready; unused while

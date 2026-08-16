@@ -232,12 +232,23 @@ def test_distinct_rungs_stays_descending():
 
 
 def test_distinct_rungs_keeps_everything_when_all_differ():
-    cfg = load_config(EXAMPLE_CONFIG_PATH)
-    model = cfg.model("qwen2_5_vl_7b")
-    ladder = cfg.sweep.qwen_visual_token_ladder
-    kept, skipped = distinct_rungs(model.adapter, model.budget, [(2160, 3840)], ladder)
+    # A ladder entirely below the image's native token count (~10,549 for 4K):
+    # every rung binds, so nothing should be dropped.
+    ladder = [8192, 6144, 4096, 2560, 1280]
+    kept, skipped = distinct_rungs("qwen25vl", {"min_pixels": 3136}, [(2160, 3840)], ladder)
     assert [r for r, _ in kept] == ladder
     assert skipped == []
+
+
+def test_distinct_rungs_drops_rungs_above_native_resolution():
+    # Rungs above native cannot bind -- the image has no more pixels to give.
+    # With a tall ladder on a 4K image this is the common case, and measuring
+    # those rungs would burn GPU cells re-testing full resolution.
+    ladder = [40960, 20480, 10240, 4096]
+    kept, skipped = distinct_rungs("qwen25vl", {"min_pixels": 3136}, [(2160, 3840)], ladder)
+    assert 20480 in {r for r, _, _ in skipped}
+    assert [r for r, _ in kept][0] == 40960     # highest of the collapsed group survives
+    assert len({e for _, e in kept}) == len(kept)
 
 
 def test_every_rung_estimate_is_nonzero():

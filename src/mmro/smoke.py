@@ -158,6 +158,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     out_path = cfg.paths.results_path / f"smoke_{args.model}.jsonl"
+    # Truncate, exactly as the sweep does. A smoke run is a fresh measurement of
+    # the current image set, not an accumulation: appending across runs mixes
+    # results from different image sets into one file, and the multi-image growth
+    # check then compares two unrelated runs and reports images as dropped.
+    if out_path.exists():
+        out_path.unlink()
     try:
         results = run_model(cfg, args.model, out_path)
     except ImageSetError as exc:

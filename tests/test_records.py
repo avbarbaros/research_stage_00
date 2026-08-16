@@ -11,6 +11,7 @@ from mmro.records import (
     ScoreRecord,
     append_jsonl,
     iter_results,
+    latest_per_image_count,
     read_jsonl,
     write_jsonl,
 )
@@ -162,3 +163,29 @@ def test_conditions_match_when_both_are_pinned():
                   decode={"do_sample": False}, budget={"max_tiles": 12})
     assert (ScoreRecord(harness="vlmevalkit", **common).conditions
             == ScoreRecord(harness="lmms_eval", **common).conditions)
+
+
+def test_latest_per_image_count_keeps_the_newest_run():
+    # Guards the false "images are being dropped" verdict: two smoke runs over
+    # different image sets in one file made tokens appear to shrink.
+    old = GenerationResult(model="m", request_id="old", n_images=1, text="x", visual_tokens=1792)
+    new = GenerationResult(model="m", request_id="new", n_images=1, text="x", visual_tokens=1280)
+    three = GenerationResult(model="m", request_id="t", n_images=3, text="x", visual_tokens=3840)
+
+    kept = latest_per_image_count([old, new, three])
+    assert len(kept) == 2
+    assert {r.request_id for r in kept} == {"new", "t"}
+    # And the growth check now sees a clean, increasing chain.
+    ordered = sorted(kept, key=lambda r: r.n_images)
+    assert all(b.visual_tokens > a.visual_tokens for a, b in zip(ordered, ordered[1:]))
+
+
+def test_latest_per_image_count_separates_models():
+    a = GenerationResult(model="qwen", request_id="a", n_images=1, text="x")
+    b = GenerationResult(model="internvl", request_id="b", n_images=1, text="x")
+    assert len(latest_per_image_count([a, b])) == 2
+
+
+def test_latest_per_image_count_is_a_noop_on_clean_results():
+    rs = [GenerationResult(model="m", request_id=str(n), n_images=n, text="x") for n in (1, 3)]
+    assert latest_per_image_count(rs) == rs

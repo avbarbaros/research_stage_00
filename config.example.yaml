@@ -57,9 +57,20 @@ models:
     repo_id: Qwen/Qwen2.5-VL-7B-Instruct
     budget:
       # 1 visual token = a 28x28 px block (14px patch, 2x2 merge).
-      # The library default permits 16384 tokens for ONE image -- guaranteed OOM
-      # on a 24GB L4. We always set this explicitly.
-      max_visual_tokens_per_image: 1280
+      # qwen-vl-utils defaults to 16384 tokens for ONE image; we always set this
+      # explicitly rather than inherit that ceiling.
+      #
+      # MEASURED ON L4 (stage 0, --all-rungs): Qwen has NO comprehension cliff.
+      # It identified every image correctly at every rung up to its VRAM limit
+      # (24,239 tok at 3 images), so the usable limit IS the VRAM limit.
+      # Two numbers bound the choice:
+      #   * VRAM  : 24,192 tok total ran at 20.6GB; above that it OOMs.
+      #   * STYLE : below ~2,500 tok/image the output degenerates into terse,
+      #             lowercase fragments -- still correct, but poor for a judge
+      #             to parse. 1,231 tok/img was terse; 2,506 was well-formed.
+      # 2560 puts the MMMU worst case (7 images = 17,920 tok, ~19.3GB) inside
+      # both bounds. See docs/qwen-vs-internvl.md for the full derivation.
+      max_visual_tokens_per_image: 2560
       min_pixels: 3136
 
   internvl3_8b_hf:
@@ -68,6 +79,22 @@ models:
     repo_id: OpenGVLab/InternVL3-8B-hf
     budget:
       # 448px tiles, 256 tokens/tile after pixel shuffle, +1 thumbnail tile.
+      #
+      # MEASURED ON L4 (stage 0, --all-rungs): InternVL has a COMPREHENSION
+      # CLIFF far below its VRAM limit, and only on multi-image prompts.
+      #   * VRAM limit    : 30,720 tokens ran fine at 21.0GB.
+      #   * QUALITY limit : every multi-image cell was correct at <= 14,336
+      #                     tokens; the first failure is at 14,848, and
+      #                     everything >= 18,944 fails.
+      # Past the cliff it drops an image entirely and describes the remaining
+      # ones as if they were all it was given -- fluent, confident, wrong. It
+      # does NOT OOM and does NOT error. Single-image was correct at every rung
+      # tested (up to 28,416 tokens), so this is specific to multi-image.
+      #
+      # Therefore budget on TOKENS, not on max_tiles: 6 keeps the MMMU worst
+      # case (7 images x 7 tiles x 256 = 12,544 tokens) inside the verified-
+      # correct region. max_tiles: 8 would reach 16,128 -- past the cliff.
+      # See docs/qwen-vs-internvl.md for the full derivation.
       max_tiles: 6
       use_thumbnail: true
 

@@ -83,6 +83,15 @@ vision path visible, where an open scene invites plausible confabulation.
 it, budget rungs stop binding and the sweep would report a boundary it never
 tested. `01_smoke.sh` warns; `02_sweep.sh` refuses without `--allow-small-images`.
 
+## Measured results
+
+[**docs/qwen-vs-internvl.md**](docs/qwen-vs-internvl.md) — how each model turns
+pixels into tokens (with worked arithmetic), the VRAM law measured on the L4,
+and the stage-0 finding that matters most: **fitting in memory is not the same
+as still understanding the images.** InternVL3's usable multi-image limit is
+~47% of its VRAM limit, and past it the model silently drops an image. Read this
+before setting any benchmark budget.
+
 ## What the sweep measures, and why
 
 "Full resolution without OOM" is not a yes/no question on a 24GB L4 — it depends

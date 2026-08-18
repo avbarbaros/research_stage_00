@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import shlex
 from dataclasses import MISSING, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
@@ -47,9 +48,9 @@ class ConfigError(Exception):
 # YAML, never these key names — so it is legitimately source, not config.
 # ---------------------------------------------------------------------------
 BUDGET_KEYS: dict[str, set[str]] = {
-    "qwen25vl": {"max_visual_tokens_per_image", "min_pixels"},
-    "internvl3_hf": {"max_tiles", "use_thumbnail"},
-    "internvl3_native": {"max_tiles", "use_thumbnail"},
+    "qwen25vl": {"max_visual_tokens_per_image", "min_pixels", "safe_total_visual_tokens"},
+    "internvl3_hf": {"max_tiles", "use_thumbnail", "safe_total_visual_tokens"},
+    "internvl3_native": {"max_tiles", "use_thumbnail", "safe_total_visual_tokens"},
 }
 
 VALID_DTYPES = {"bfloat16", "float16", "float32"}
@@ -239,6 +240,10 @@ class HarnessConfig:
     enabled: bool = True
     venv: str = ""
     work_dir: str = ""
+    repo: str = ""          # git URL, cloned by scripts/03_setup_harness.sh
+    repo_dir: str = ""      # where the clone lives
+    model_id: str = ""      # the harness's OWN name for the model
+    command: str = ""       # command template; see `render_command`
 
     name: str = ""  # populated by the loader
 
@@ -258,6 +263,30 @@ class HarnessConfig:
     def work_path(self) -> Path:
         return _resolve(self.work_dir)
 
+    @property
+    def repo_path(self) -> Path:
+        return _resolve(self.repo_dir)
+
+    def render_command(self, **fields: Any) -> list[str]:
+        """Fill the command template.
+
+        The invocation lives in config because both harnesses change their CLI
+        between releases. When one does, you edit a string here rather than
+        patching a backend -- the same rule the rest of the project follows.
+        """
+        if not self.command:
+            raise ConfigError(
+                f"eval.harnesses.{self.name}.command: not set; nothing to run"
+            )
+        try:
+            rendered = self.command.format(**fields)
+        except KeyError as exc:
+            raise ConfigError(
+                f"eval.harnesses.{self.name}.command: unknown placeholder {exc}; "
+                f"available: {sorted(fields)}"
+            ) from exc
+        return shlex.split(rendered)
+
 
 @dataclass
 class TaskRow:
@@ -270,6 +299,25 @@ class TaskRow:
     name: str
     vlmevalkit: str = ""
     lmms_eval: str = ""
+
+    # The most images a single question in this benchmark can carry. It sets the
+    # per-image visual budget: a mostly-single-image task must NOT inherit the
+    # 7-image worst-case budget, or the model sees a needlessly downscaled image
+    # and scores below its published number for a reason that is our doing.
+    max_images: int = 1
+
+    # Published score for the reference model, as a percentage. The gate compares
+    # our result against this. Null means "no published number to check against".
+    baseline: float | None = None
+
+    def __post_init__(self) -> None:
+        _check_int(f"eval.tasks[{self.name}].max_images", self.max_images, minimum=1)
+        if self.baseline is not None:
+            if not isinstance(self.baseline, (int, float)) or isinstance(self.baseline, bool):
+                raise ConfigError(
+                    f"eval.tasks[{self.name}].baseline: expected a number, "
+                    f"got {self.baseline!r}"
+                )
 
     def id_for(self, harness: str) -> str:
         _check_enum("harness", harness, KNOWN_HARNESSES)
@@ -303,10 +351,15 @@ class EvalConfig:
     harnesses: dict[str, HarnessConfig] = field(default_factory=dict)
     tasks: list[TaskRow] = field(default_factory=list)
     limit: int | None = None
+    # Absolute percentage points a result may differ from `baseline` and still
+    # pass. Stage 0.2's gate.
+    gate_tolerance: float = 2.0
     judge: JudgeConfig = field(default_factory=JudgeConfig)
 
     def __post_init__(self) -> None:
         _check_bool("eval.enabled", self.enabled)
+        if self.gate_tolerance < 0:
+            raise ConfigError("eval.gate_tolerance: must be >= 0")
         if self.max_new_tokens is not None:
             _check_int("eval.max_new_tokens", self.max_new_tokens, minimum=1)
         if self.limit is not None:

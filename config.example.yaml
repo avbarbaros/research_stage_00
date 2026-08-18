@@ -72,6 +72,11 @@ models:
       # both bounds. See docs/qwen-vs-internvl.md for the full derivation.
       max_visual_tokens_per_image: 2560
       min_pixels: 3136
+      # Stage-0 measured TOTAL ceiling across all images in one prompt. Stage
+      # 0.2 divides this by a task's max_images to get its per-image budget.
+      # Qwen's ceiling is VRAM: 24,192 tok ran at 20.6GB, 30,312 OOM'd. 20,000
+      # leaves margin for fragmentation.
+      safe_total_visual_tokens: 20000
 
   internvl3_8b_hf:
     enabled: true
@@ -97,6 +102,10 @@ models:
       # See docs/qwen-vs-internvl.md for the full derivation.
       max_tiles: 6
       use_thumbnail: true
+      # InternVL's ceiling is COMPREHENSION, not VRAM: every multi-image cell
+      # was correct at <= 14,336 tok and wrong from 14,848 up, while VRAM
+      # allowed 30,720. Budget against the lower number.
+      safe_total_visual_tokens: 14336
 
   internvl3_8b_native:
     # Fallback. Enable if the -hf path misbehaves on multi-image, or when you
@@ -167,36 +176,73 @@ sweep:
 # compared -- deltas are expected and are the research output, not a bug.
 # ----------------------------------------------------------------------------
 eval:
-  enabled: false
+  enabled: false                   # set true to run stage 0.2
   max_new_tokens: 512
+
+  # The gate: how far a score may sit from the published baseline and still pass.
+  gate_tolerance: 2.0
 
   harnesses:
     vlmevalkit:
       enabled: true
       venv: .venvs/vlmevalkit
+      repo: https://github.com/open-compass/VLMEvalKit
+      repo_dir: .venvs/src/VLMEvalKit
       work_dir: results/vlmevalkit
+      # The harness's OWN registered name for the model. For the gate we run
+      # the harness's own implementation, because that is what produced the
+      # published numbers; swapping in our adapter adds a variable and belongs
+      # in a separate comparison AFTER the gate passes.
+      model_id: Qwen2.5-VL-7B-Instruct
+      # Command template. Placeholders: {python} {repo_dir} {work_dir}
+      # {task_id} {task} {model_id} {model_path} {max_new_tokens} {limit}.
+      # VERIFY against the VLMEvalKit README for your commit -- its CLI moves
+      # between releases, and this is a string in config precisely so a change
+      # there does not mean patching code.
+      command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir}"
+
     lmms_eval:
       enabled: true
       venv: .venvs/lmms_eval
+      repo: https://github.com/EvolvingLMMs-Lab/lmms-eval
+      repo_dir: .venvs/src/lmms-eval
       work_dir: results/lmms_eval
+      model_id: qwen2_5_vl
+      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir}"
 
   # One row per benchmark, carrying BOTH harnesses' task IDs -- the two projects
   # name the same benchmark differently. This mapping is what makes the
   # cross-harness comparison meaningful, so it lives in config where it can be
   # corrected without touching code.
+  #
+  # max_images: the most images ONE question can contain. It divides the model's
+  #   measured safe token total into a per-image budget. Getting this wrong is a
+  #   silent accuracy loss: a single-image benchmark given the 7-image budget
+  #   sees every chart needlessly downscaled.
+  # baseline: published Qwen2.5-VL-7B-Instruct score, in percent.
+  #   *** VERIFY THESE against the official model card before trusting the gate.
+  #   A wrong baseline turns the gate into noise in either direction. ***
   tasks:
     - name: mmmu_val
-      vlmevalkit: MMMU_DEV_VAL
-      lmms_eval: mmmu_val
+      vlmevalkit: MMMU_DEV_VAL     # NOTE: spans dev+validation
+      lmms_eval: mmmu_val          # NOTE: validation only -- a real split
+                                   # difference, and a likely source of delta
+      max_images: 7
+      baseline: 58.6
     - name: mathvista_testmini
       vlmevalkit: MathVista_MINI
       lmms_eval: mathvista_testmini
+      max_images: 1                # single-image: gets the whole token budget
+      baseline: 68.2
 
-  limit: null                      # cap samples per task for quick smoke runs
+  limit: null                      # cap samples per task for a quick shakeout;
+                                   # MUST be null for a gated run
 
-  # MMMU and MathVista open-ended items need answer extraction. Decided at
-  # stage 0.2; the shape is fixed now so the dependency is visible.
+  # MMMU and MathVista open-ended items need LLM answer extraction, and the
+  # published numbers were produced WITH it. Leaving this at 'none' falls back
+  # to rule-based matching, which systematically under-scores -- often by more
+  # than the 2-point gate allows. Set this before a gated run.
   judge:
     backend: none                  # none | api | local
-    model: null
-    api_key_env: null
+    model: null                    # e.g. gpt-4o-mini, or a local model id
+    api_key_env: null              # env var holding the key, e.g. OPENAI_API_KEY

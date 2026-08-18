@@ -1,41 +1,127 @@
-"""VLMEvalKit backend -- STUB until stage 0.2.
+"""VLMEvalKit backend.
 
-Integration notes, recorded now while the reasoning is fresh:
+Runs entirely inside ``eval.harnesses.vlmevalkit.venv``. Nothing from vlmeval is
+imported here -- its pins conflict with the base environment, which is the whole
+reason the venvs are separate.
 
-* VLMEvalKit wants a model class deriving from ``vlmeval.vlm.base.BaseModel``
-  with ``generate_inner(self, message, dataset=None) -> str``. ``message`` is a
-  list of ``{"type": "image"|"text", "value": ...}`` dicts, so the wrapper
-  splits it into image paths and a text string and calls
-  ``mmro.models.<adapter>.generate(images, text, decode)`` -- the contract stage
-  0 already proved.
-* ``INTERLEAVE = True`` on the wrapper class, otherwise MMMU's multi-image items
-  get flattened to the first image. Stage 0's multi-image evidence is exactly
-  what makes this worth setting.
-* It runs from its own venv (``eval.harnesses.vlmevalkit.venv``), so this
-  backend builds a command and shells out. It must not import vlmeval here --
-  that package's pins conflict with the base environment's.
-* Results land as ``{work_dir}/{model}/{model}_{task}*.csv|.json``; parse the
-  score file and emit one ScoreRecord per metric.
-* MathVista free-form items need answer extraction. VLMEvalKit uses a judge
-  model for this; with ``eval.judge.backend: none`` it falls back to rule-based
-  extraction, which understates the score. Report which was used -- comparing a
-  judged score against an unjudged one across harnesses is a trap.
+The invocation is a template in config (``eval.harnesses.vlmevalkit.command``)
+because VLMEvalKit's CLI changes between releases. When it does, you edit a
+string in config.yaml rather than patching this file.
+
+**Which model implementation runs.** By default the command names VLMEvalKit's
+*own* registered Qwen2.5-VL class, not our adapter. That is deliberate for the
+stage-0.2 gate: published numbers were produced by the harness's implementation,
+so reproducing them means using it. Swapping in our adapter adds a variable and
+belongs in a separate comparison, once the gate has passed.
+
+Results land under ``work_dir`` as ``{model}_{dataset}_acc.csv`` alongside the
+per-item ``.xlsx``. We search rather than assume an exact filename, because the
+layout has moved across versions.
 """
 
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
 from ..config import TaskRow
 from ..records import ScoreRecord
-from .base import HarnessBackend
+from .base import HarnessBackend, budget_for_task
+
+# Column names VLMEvalKit has used for the headline accuracy, most recent first.
+ACCURACY_COLUMNS = ("Overall", "overall", "Average", "acc", "Accuracy")
 
 
 class VLMEvalKitBackend(HarnessBackend):
     name = "vlmevalkit"
 
     def run(self, model_name: str, task: TaskRow) -> list[ScoreRecord]:
+        problems = self.check_available()
+        if problems:
+            raise RuntimeError("; ".join(problems))
+
         task_id = task.id_for(self.name)
-        raise NotImplementedError(
-            f"VLMEvalKit backend is a stage-0.2 deliverable (would run "
-            f"{task.name!r} as {task_id!r} against {model_name!r}). "
-            f"Stage 0 ships the protocol and task mapping only."
-        )
+        fields = self.command_fields(model_name, task)
+        argv = self.harness_cfg.render_command(**fields)
+
+        work = self.harness_cfg.work_path
+        work.mkdir(parents=True, exist_ok=True)
+        code = self.run_command(argv, work / f"{model_name}_{task.name}.log")
+        if code != 0:
+            raise RuntimeError(
+                f"VLMEvalKit exited {code} for {task.name}; see the log in {work}"
+            )
+
+        records = self.parse_results(work, model_name, task, task_id)
+        if not records:
+            raise RuntimeError(
+                f"VLMEvalKit produced no parseable score for {task_id} under {work}. "
+                f"It may have written a layout this parser does not know; check the "
+                f"directory and widen ACCURACY_COLUMNS or the glob if so."
+            )
+        return records
+
+    # -- parsing ------------------------------------------------------------
+    def find_score_files(self, work: Path, task_id: str) -> list[Path]:
+        """Score CSVs for this task, newest first."""
+        hits = [
+            p for p in work.rglob("*.csv")
+            if task_id.lower() in p.name.lower() and "acc" in p.name.lower()
+        ]
+        return sorted(hits, key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def parse_results(
+        self, work: Path, model_name: str, task: TaskRow, task_id: str
+    ) -> list[ScoreRecord]:
+        records: list[ScoreRecord] = []
+        for path in self.find_score_files(work, task_id)[:1]:
+            for metric, score in self._read_csv(path).items():
+                records.append(
+                    ScoreRecord(
+                        harness=self.name,
+                        model=model_name,
+                        task=task.name,
+                        harness_task_id=task_id,
+                        metric=metric,
+                        score=score,
+                        decode=self.decode_echo(),
+                        budget=budget_for_task(self.cfg, model_name, task),
+                        raw_path=str(path),
+                    )
+                )
+        return records
+
+    @staticmethod
+    def _read_csv(path: Path) -> dict[str, float]:
+        """Pull the headline accuracy out of a VLMEvalKit ``*_acc.csv``.
+
+        The file is typically one row of splits/categories. We take the overall
+        column when present and fall back to the first numeric column, so a
+        renamed header degrades to a wrong-but-visible metric name rather than a
+        crash -- the report shows the metric, so a surprise is legible.
+        """
+        with path.open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        if not rows:
+            return {}
+        row = rows[0]
+
+        def as_pct(raw: str) -> float | None:
+            try:
+                value = float(str(raw).strip().rstrip("%"))
+            except (TypeError, ValueError):
+                return None
+            # VLMEvalKit reports percentages; older builds emitted fractions.
+            return value * 100 if 0.0 <= value <= 1.0 else value
+
+        for column in ACCURACY_COLUMNS:
+            if column in row:
+                value = as_pct(row[column])
+                if value is not None:
+                    return {"accuracy": value}
+
+        for key, raw in row.items():
+            value = as_pct(raw)
+            if value is not None:
+                return {key.strip() or "accuracy": value}
+        return {}

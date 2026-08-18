@@ -204,10 +204,12 @@ def test_both_backends_are_registered_and_constructible(cfg):
         assert backend.name == name
 
 
-def test_backends_are_stubs_that_say_so(cfg):
+def test_backends_refuse_cleanly_when_the_venv_is_missing(cfg):
+    # Implemented as of stage 0.2. With no venv built they must fail fast with
+    # an actionable message rather than shelling out to a missing interpreter.
     for name in BACKENDS:
         backend = get_backend_class(name)(cfg)
-        with pytest.raises(NotImplementedError, match="stage-0.2"):
+        with pytest.raises(RuntimeError, match="venv is missing"):
             backend.run("qwen2_5_vl_7b", cfg.eval.task("mmmu_val"))
 
 

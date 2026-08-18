@@ -190,7 +190,41 @@ def eval_section(cfg: Config, scores: list[ScoreRecord]) -> list[str]:
             "",
         ]
 
-    lines = [
+    # The gate comes first: an unvalidated pipeline makes every number below it
+    # meaningless, so it should be the first thing a reader sees.
+    from .eval import check_gate, diagnose  # noqa: PLC0415
+
+    gate = check_gate(cfg, scores)
+    lines = []
+    if gate:
+        lines += [
+            f"### Gate — within ±{cfg.eval.gate_tolerance} points of published?",
+            "",
+            "| Task | Harness | Ours | Published | Δ | Result |",
+            "|---|---|---|---|---|---|",
+        ]
+        for g in sorted(gate, key=lambda x: (x.task, x.harness)):
+            if g.baseline is None:
+                lines.append(
+                    f"| {g.task} | {g.harness} | {_fmt(g.score)} | — | — | _no baseline_ |"
+                )
+                continue
+            verdict = "PASS" if g.passed else "**FAIL**"
+            lines.append(
+                f"| {g.task} | {g.harness} | {_fmt(g.score)} | {_fmt(g.baseline)} | "
+                f"{g.delta:+.2f} | {verdict} |"
+            )
+        lines.append("")
+        notes = diagnose(cfg, gate)
+        if notes:
+            lines.append("**Most likely causes, in order:**")
+            lines.append("")
+            lines += [f"- {n}" for n in notes]
+            lines.append("")
+
+    lines += [
+        "### Cross-harness comparison",
+        "",
         "Same model, same task, both harnesses. Deltas are expected — the two use",
         "different prompt templates and answer extraction — and explaining them is",
         "the point of running both.",

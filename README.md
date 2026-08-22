@@ -52,7 +52,7 @@ python -m mmro.sweep --all-rungs --model internvl3_8b_hf \
 ### Stage 0.2 — do our numbers match the published ones?
 
 ```bash
-bash scripts/03_setup_harness.sh    # clones both harnesses into isolated venvs
+bash scripts/03_setup_harness.sh --archive   # clones + two isolated venvs, saved to Drive
 # then, before running:
 #   1. verify each eval.harnesses.<name>.command against that project's README
 #   2. verify the eval.tasks[].baseline values against the official model card
@@ -60,6 +60,19 @@ bash scripts/03_setup_harness.sh    # clones both harnesses into isolated venvs
 python -m mmro.eval --set eval.enabled=true --set eval.limit=25   # shakeout, minutes
 bash scripts/04_eval.sh             # the real run — hours
 ```
+
+**The venvs must be on local disk, not Drive.** A virtualenv needs symlinks and
+`ensurepip` needs normal file semantics; Drive's FUSE mount has neither, so
+`python -m venv` fails. (A `git clone` there succeeds, because it only writes
+regular files — which is why the failure surfaces halfway through setup.) The
+defaults point `venv` and `repo_dir` at `/content/MMRM/...` while `work_dir`
+stays on Drive so results survive; the script probes for symlink support and
+stops with that explanation before installing anything.
+
+Local disk is wiped between Colab sessions, so `--archive` tars each built venv
+(~5GB, mostly torch) to Drive. Later runs restore in minutes instead of
+reinstalling. Venvs are not relocatable, which is why the venv paths are pinned
+absolutely in config rather than derived from the repo location.
 
 `mmro.eval` runs each task on each enabled harness, then checks the gate and
 exits non-zero if it fails. `--gate-only` re-checks existing scores without

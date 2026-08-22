@@ -182,12 +182,19 @@ eval:
   # The gate: how far a score may sit from the published baseline and still pass.
   gate_tolerance: 2.0
 
+  # NOTE ON PATHS: venv and repo_dir MUST be on local disk, never on Google
+  # Drive. A virtualenv needs symlinks and `ensurepip` needs normal file
+  # semantics; Drive's FUSE mount provides neither, and `python -m venv` fails
+  # with an ensurepip error. (A git clone succeeds there because it only writes
+  # regular files -- which is why the failure appears halfway through setup.)
+  # These are rebuilt each Colab session; work_dir stays on Drive so results
+  # survive. scripts/03_setup_harness.sh checks this before it wastes your time.
   harnesses:
     vlmevalkit:
       enabled: true
-      venv: .venvs/vlmevalkit
+      venv: /content/MMRM/venvs/vlmevalkit
       repo: https://github.com/open-compass/VLMEvalKit
-      repo_dir: .venvs/src/VLMEvalKit
+      repo_dir: /content/MMRM/src/VLMEvalKit
       work_dir: results/vlmevalkit
       # The harness's OWN registered name for the model. For the gate we run
       # the harness's own implementation, because that is what produced the
@@ -203,9 +210,9 @@ eval:
 
     lmms_eval:
       enabled: true
-      venv: .venvs/lmms_eval
+      venv: /content/MMRM/venvs/lmms_eval        # local disk — see note above
       repo: https://github.com/EvolvingLMMs-Lab/lmms-eval
-      repo_dir: .venvs/src/lmms-eval
+      repo_dir: /content/MMRM/src/lmms-eval
       work_dir: results/lmms_eval
       model_id: qwen2_5_vl
       command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir}"

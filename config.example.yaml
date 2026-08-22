@@ -176,7 +176,7 @@ sweep:
 # compared -- deltas are expected and are the research output, not a bug.
 # ----------------------------------------------------------------------------
 eval:
-  enabled: false                   # set true to run stage 0.2
+  enabled: true                   # set true to run stage 0.2
   max_new_tokens: 512
 
   # The gate: how far a score may sit from the published baseline and still pass.

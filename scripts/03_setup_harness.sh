@@ -6,11 +6,19 @@
 # torch; the base environment is never touched. The backends shell out, so the
 # pins never meet.
 #
-# THE VENVS MUST BE ON LOCAL DISK. A virtualenv needs symlinks and `ensurepip`
-# needs normal file semantics; Google Drive's FUSE mount provides neither, and
-# `python -m venv` dies with an ensurepip error. A git clone succeeds there
-# because it only writes regular files, which is why the failure shows up
-# halfway through. This script checks before installing anything.
+# Two separate things break venv creation here, and they look identical:
+#
+#   1. LOCATION. A virtualenv needs symlinks; Google Drive's FUSE mount has
+#      none. A git clone succeeds there because it only writes regular files,
+#      so the failure surfaces halfway through setup. `assert_real_filesystem`
+#      probes for this before anything is installed.
+#   2. ENVIRONMENT. Even on local disk, Colab's Python can fail `ensurepip`
+#      with a bare "exit status 1" that says nothing about why -- usually pip
+#      configuration leaking in from the parent environment. `create_venv`
+#      neutralises that, tries three strategies, and prints the real error if
+#      all of them fail.
+#
+# Fixing (1) does not fix (2). Both are handled.
 #
 # Local disk is wiped between Colab sessions, so each venv (~5GB, mostly torch)
 # would be rebuilt every time. Pass --archive to tar them to Drive afterwards;
@@ -79,11 +87,85 @@ EOF
 
 archive_path() { echo "${ARCHIVE_DIR}/$1.tar"; }
 
+# --- venv creation ----------------------------------------------------------
+# `python -m venv` fails on Colab often enough that one strategy is not enough.
+# The usual causes are environment rather than disk: Colab exports pip settings
+# (PIP_TARGET / PYTHONUSERBASE) and ships /etc/pip.conf, and ensurepip inherits
+# all of it, then fails with a bare "exit status 1" that says nothing.
+#
+# So: neutralise the pip environment, then try three ways and report the real
+# error if every one fails.
+create_venv() {
+  local venv="$1"
+
+  # Colab's pip configuration must not reach the bootstrap.
+  local -a clean=(
+    env -u PIP_TARGET -u PIP_PREFIX -u PIP_USER -u PYTHONUSERBASE
+        -u PYTHONHOME -u PYTHONPATH
+    PIP_CONFIG_FILE=/dev/null
+  )
+
+  echo "creating venv: $venv"
+
+  # 1. Standard venv, with the environment cleaned.
+  if "${clean[@]}" python -m venv "$venv" 2>"$venv.err"; then
+    rm -f "$venv.err"; return 0
+  fi
+  echo "  python -m venv failed; trying virtualenv"
+  rm -rf "$venv"
+
+  # 2. virtualenv bundles its own pip wheels and never calls ensurepip, which
+  #    sidesteps the failure entirely. It is a small pure-Python install.
+  if ! python -c "import virtualenv" >/dev/null 2>&1; then
+    "${clean[@]}" python -m pip install --quiet virtualenv || true
+  fi
+  if "${clean[@]}" python -m virtualenv "$venv" 2>>"$venv.err"; then
+    rm -f "$venv.err"; return 0
+  fi
+  echo "  virtualenv failed; trying venv --without-pip + get-pip.py"
+  rm -rf "$venv"
+
+  # 3. Build the venv with no pip at all, then bootstrap pip into it by hand.
+  if "${clean[@]}" python -m venv --without-pip "$venv" 2>>"$venv.err"; then
+    local getpip="${venv}.get-pip.py"
+    if curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$getpip" \
+       && "${clean[@]}" "$venv/bin/python" "$getpip" --quiet; then
+      rm -f "$getpip" "$venv.err"; return 0
+    fi
+    rm -f "$getpip"
+  fi
+
+  cat >&2 <<EOF
+
+ERROR: could not create a virtualenv at $venv. All three strategies failed.
+
+  The underlying error (usually hidden behind "exit status 1"):
+EOF
+  sed 's/^/    /' "$venv.err" >&2 2>/dev/null || true
+  cat >&2 <<EOF
+
+  Reproduce it directly to see the full trace:
+
+      python -m venv /tmp/probe_venv          # the failure
+      python -m ensurepip --version           # is ensurepip present at all?
+      python -c "import sys; print(sys.prefix, sys.base_prefix)"
+      env | grep -iE '^(PIP_|PYTHON)'         # Colab's pip environment
+      cat /etc/pip.conf 2>/dev/null
+
+  Common fixes:
+    * apt-get install -y python3-venv        (ensurepip missing entirely)
+    * pip install virtualenv                 (then re-run this script)
+    * unset PIP_TARGET                       (Colab sometimes exports it)
+
+EOF
+  return 1
+}
+
 restore_venv() {
   local name="$1" venv="$2" tar_path
   tar_path="$(archive_path "$name")"
-  [[ "$REBUILD" -eq 1 ]] && return 1
-  [[ -f "$tar_path" ]] || return 1
+  if [[ "$REBUILD" -eq 1 ]]; then return 1; fi
+  if [[ ! -f "$tar_path" ]]; then return 1; fi
   echo "restoring venv from $tar_path"
   mkdir -p "$(dirname "$venv")"
   # Venvs are not relocatable, so this only works because the path is the same
@@ -137,8 +219,7 @@ setup_one() {
   elif restore_venv "$name" "$venv"; then
     :
   else
-    echo "creating venv: $venv"
-    python -m venv "$venv"
+    create_venv "$venv" || return 1
     "$venv/bin/python" -m pip install --quiet --upgrade pip
 
     # Full isolation on purpose: --system-site-packages would let the harness

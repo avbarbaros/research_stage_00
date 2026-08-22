@@ -1,7 +1,14 @@
 # Stage 0.2 — ISOLATED VENV ONLY. Never install into the base environment.
 # See requirements/harness_vlmevalkit.txt for the rationale.
 #
-#   python -m venv .venvs/lmms_eval
-#   .venvs/lmms_eval/bin/pip install -r requirements/harness_lmms_eval.txt
+# lmms-eval's qwen2_5_vl model module imports `decord` unconditionally, even for
+# image-only tasks like MMMU and MathVista, so it is required despite no video
+# being involved.
+#
+# NOTE ON PYTHON VERSION: upstream `decord` (0.6.0) ships no wheel for Python
+# 3.12+, so on a 3.13 venv `pip install decord` tries to build from source and
+# fails. `eva-decord` is a maintained fork exposing the same `decord` module
+# with wider wheel coverage. If neither installs, pin an older interpreter with
+# eval.harnesses.lmms_eval.python_bin (e.g. python3.11) and rebuild the venv.
 
-lmms-eval
+eva-decord         # provides `decord`; use plain `decord` if your Python is <=3.11

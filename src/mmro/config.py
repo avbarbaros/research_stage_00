@@ -244,6 +244,15 @@ class HarnessConfig:
     repo_dir: str = ""      # where the clone lives
     model_id: str = ""      # the harness's OWN name for the model
     command: str = ""       # command template; see `render_command`
+    # A statement that imports what the harness needs to run our tasks. The
+    # setup script executes it after installing and reports (or auto-installs)
+    # whatever is missing, so dependency gaps surface in one pass instead of one
+    # failed benchmark launch at a time.
+    import_probe: str = ""
+    # Interpreter to build the venv with. Empty means "whatever `python` is".
+    # Set it when a harness dependency has no wheel for the default Python --
+    # e.g. decord has none for 3.12+, so lmms-eval may need python3.11.
+    python_bin: str = ""
 
     name: str = ""  # populated by the loader
 

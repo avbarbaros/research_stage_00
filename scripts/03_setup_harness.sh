@@ -96,7 +96,8 @@ archive_path() { echo "${ARCHIVE_DIR}/$1.tar"; }
 # So: neutralise the pip environment, then try three ways and report the real
 # error if every one fails.
 create_venv() {
-  local venv="$1"
+  local venv="$1" py="${2:-}"
+  if [[ -z "$py" ]]; then py=python; fi
 
   # Colab's pip configuration must not reach the bootstrap.
   local -a clean=(
@@ -108,7 +109,7 @@ create_venv() {
   echo "creating venv: $venv"
 
   # 1. Standard venv, with the environment cleaned.
-  if "${clean[@]}" python -m venv "$venv" 2>"$venv.err"; then
+  if "${clean[@]}" "$py" -m venv "$venv" 2>"$venv.err"; then
     rm -f "$venv.err"; return 0
   fi
   echo "  python -m venv failed; trying virtualenv"
@@ -116,17 +117,17 @@ create_venv() {
 
   # 2. virtualenv bundles its own pip wheels and never calls ensurepip, which
   #    sidesteps the failure entirely. It is a small pure-Python install.
-  if ! python -c "import virtualenv" >/dev/null 2>&1; then
-    "${clean[@]}" python -m pip install --quiet virtualenv || true
+  if ! "$py" -c "import virtualenv" >/dev/null 2>&1; then
+    "${clean[@]}" "$py" -m pip install --quiet virtualenv || true
   fi
-  if "${clean[@]}" python -m virtualenv "$venv" 2>>"$venv.err"; then
+  if "${clean[@]}" "$py" -m virtualenv "$venv" 2>>"$venv.err"; then
     rm -f "$venv.err"; return 0
   fi
   echo "  virtualenv failed; trying venv --without-pip + get-pip.py"
   rm -rf "$venv"
 
   # 3. Build the venv with no pip at all, then bootstrap pip into it by hand.
-  if "${clean[@]}" python -m venv --without-pip "$venv" 2>>"$venv.err"; then
+  if "${clean[@]}" "$py" -m venv --without-pip "$venv" 2>>"$venv.err"; then
     local getpip="${venv}.get-pip.py"
     if curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$getpip" \
        && "${clean[@]}" "$venv/bin/python" "$getpip" --quiet; then
@@ -161,6 +162,89 @@ EOF
   return 1
 }
 
+# --- dependency doctor ------------------------------------------------------
+# Both harnesses import large registries at package-import time, so ONE missing
+# optional dependency stops the run before it reaches your task. Discovering
+# them one benchmark launch at a time is slow, so this loop imports, installs
+# whatever is missing, and repeats -- then records what it added so the next
+# environment does not have to rediscover it.
+#
+# Import name != package name for a handful of these, hence the mapping.
+pypi_name() {
+  case "$1" in
+    cv2)         echo "opencv-python-headless" ;;
+    PIL)         echo "pillow" ;;
+    sklearn)     echo "scikit-learn" ;;
+    yaml)        echo "pyyaml" ;;
+    rouge_score) echo "rouge-score" ;;
+    Levenshtein) echo "python-Levenshtein" ;;
+    fitz)        echo "pymupdf" ;;
+    # decord ships no wheel for Python 3.12+; the fork does.
+    decord)      echo "eva-decord" ;;
+    *)           echo "$1" ;;
+  esac
+}
+
+doctor_imports() {
+  local name="$1" venv="$2" probe="$3"
+  if [[ -z "$probe" ]]; then return 0; fi
+
+  local auto="requirements/harness_${name}.auto.txt"
+  local -a installed=()
+  local max=15 i err missing pkg
+
+  echo "verifying imports: $probe"
+  for ((i = 0; i < max; i++)); do
+    if "$venv/bin/python" -c "$probe" 2>/tmp/mmro_probe.err; then
+      if ((${#installed[@]})); then
+        printf '%s\n' "${installed[@]}" > "$auto"
+        echo "  resolved by installing: ${installed[*]}"
+        echo "  recorded in $auto -- promote these into requirements/harness_${name}.txt"
+      else
+        echo "  all imports satisfied"
+      fi
+      return 0
+    fi
+
+    missing="$(sed -n "s/^ModuleNotFoundError: No module named '\([^']*\)'.*/\1/p" \
+               /tmp/mmro_probe.err | tail -1)"
+    if [[ -z "$missing" ]]; then
+      echo "  import failed for a reason that is not a missing module:" >&2
+      sed 's/^/    /' /tmp/mmro_probe.err >&2
+      return 1
+    fi
+
+    pkg="$(pypi_name "$missing")"
+    echo "  missing '$missing' -> installing $pkg"
+    if ! "$venv/bin/python" -m pip install --quiet "$pkg"; then
+      cat >&2 <<EOF
+
+ERROR: could not install '$pkg' (needed for '$missing') into $venv.
+
+  If this is a wheel-availability problem, the usual cause is the interpreter
+  version. Check it:
+
+      $venv/bin/python --version
+
+  Then pin an older one in config.yaml and rebuild:
+
+      eval:
+        harnesses:
+          ${name}:
+            python_bin: python3.11
+
+      bash scripts/03_setup_harness.sh --rebuild
+
+EOF
+      return 1
+    fi
+    installed+=("$pkg")
+  done
+
+  echo "  gave up after $max missing modules; something larger is wrong" >&2
+  return 1
+}
+
 restore_venv() {
   local name="$1" venv="$2" tar_path
   tar_path="$(archive_path "$name")"
@@ -183,10 +267,12 @@ restore_venv() {
 
 setup_one() {
   local name="$1"
-  local venv repo repo_dir reqs
+  local venv repo repo_dir reqs probe python_bin
   venv="$(read_cfg "${name}.venv")"
   repo="$(read_cfg "${name}.repo")"
   repo_dir="$(read_cfg "${name}.repo_dir")"
+  probe="$(read_cfg "${name}.import_probe")"
+  python_bin="$(read_cfg "${name}.python_bin")"
   reqs="requirements/harness_${name}.txt"
 
   echo
@@ -219,7 +305,7 @@ setup_one() {
   elif restore_venv "$name" "$venv"; then
     :
   else
-    create_venv "$venv" || return 1
+    create_venv "$venv" "$python_bin" || return 1
     "$venv/bin/python" -m pip install --quiet --upgrade pip
 
     # Full isolation on purpose: --system-site-packages would let the harness
@@ -228,10 +314,16 @@ setup_one() {
     # pins. Correctness beats the ~5GB and ~10 minutes it costs.
     echo "installing ${name} (pulls its own torch; several GB, expect ~10 min)"
     "$venv/bin/python" -m pip install -e "$repo_dir"
+    # VLMEvalKit ships a requirements.txt that the editable install ignores.
+    if [[ -f "$repo_dir/requirements.txt" ]]; then
+      "$venv/bin/python" -m pip install -r "$repo_dir/requirements.txt" || true
+    fi
     if [[ -f "$reqs" ]]; then
       "$venv/bin/python" -m pip install -r "$reqs"
     fi
   fi
+
+  doctor_imports "$name" "$venv" "$probe" || return 1
 
   echo "ready: $("$venv/bin/python" --version) at $venv"
 

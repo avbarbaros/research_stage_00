@@ -207,6 +207,11 @@ eval:
       # between releases, and this is a string in config precisely so a change
       # there does not mean patching code.
       command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir}"
+      # VLMEvalKit imports its whole dataset registry on `import vlmeval`, so a
+      # single missing optional dep stops run.py before it reaches your task.
+      # The setup script runs this and resolves what is missing in one pass.
+      import_probe: "import vlmeval"
+      python_bin: ""               # e.g. python3.11 if a dep lacks a wheel
 
     lmms_eval:
       enabled: true
@@ -216,6 +221,12 @@ eval:
       work_dir: results/lmms_eval
       model_id: qwen2_5_vl
       command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir}"
+      # Importing the model module is what fails (it pulls decord even for
+      # image-only tasks), so probe that rather than just the package.
+      import_probe: "import lmms_eval; import lmms_eval.models.simple.qwen2_5_vl"
+      # decord has no wheel for Python 3.12+. If eva-decord also fails to
+      # install, set this to python3.11 and rebuild with --rebuild.
+      python_bin: ""
 
   # One row per benchmark, carrying BOTH harnesses' task IDs -- the two projects
   # name the same benchmark differently. This mapping is what makes the

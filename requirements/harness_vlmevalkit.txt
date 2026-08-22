@@ -3,7 +3,14 @@
 # VLMEvalKit and lmms-eval pin conflicting dependencies; each gets its own venv
 # and the backends shell out, so the pins never meet.
 #
-#   python -m venv .venvs/vlmevalkit
-#   .venvs/vlmevalkit/bin/pip install -r requirements/harness_vlmevalkit.txt
+# This file holds the gaps `pip install -e <clone>` leaves behind. VLMEvalKit
+# imports its ENTIRE dataset registry at package import time, so one missing
+# optional dependency stops `run.py` before it reaches your task -- which is why
+# a MMMU run dies inside mmlongbench.
+#
+# scripts/03_setup_harness.sh installs this after the editable install, then
+# runs an import probe and appends anything still missing to
+# requirements/harness_vlmevalkit.auto.txt. Promote entries from there into this
+# file once you have confirmed them.
 
-vlmeval
+rouge-score        # imported by dataset/utils/mmlongbench_metrics.py

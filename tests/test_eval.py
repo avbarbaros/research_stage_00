@@ -258,3 +258,37 @@ def test_subset_runs_are_called_out(cfg):
 def test_a_huge_miss_suggests_the_wrong_thing_ran(cfg):
     notes = " ".join(diagnose(cfg, check_gate(cfg, [score(value=20.0)])))
     assert "wrong checkpoint" in notes or "wrong thing ran" in notes
+
+
+# ---------------------------------------------------------------------------
+# Harness environment fields (stage-0.2 setup)
+# ---------------------------------------------------------------------------
+def test_both_harnesses_declare_an_import_probe(cfg):
+    # Both import large registries at package-import time, so one missing
+    # optional dep stops a run before it reaches the task. The probe is what
+    # surfaces that at setup instead of at launch.
+    for name, h in cfg.eval.harnesses.items():
+        assert h.import_probe, f"{name} has no import_probe"
+
+
+def test_lmms_eval_probe_imports_the_model_module_not_just_the_package(cfg):
+    # `import lmms_eval` alone succeeds; it is the qwen2_5_vl model module that
+    # pulls decord and fails, so the probe has to reach that far.
+    probe = cfg.eval.harnesses["lmms_eval"].import_probe
+    assert "models" in probe and "qwen2_5_vl" in probe
+
+
+def test_python_bin_defaults_to_empty(cfg):
+    # Empty means "whatever `python` is"; it exists as an escape hatch for
+    # dependencies with no wheel for the default interpreter.
+    for h in cfg.eval.harnesses.values():
+        assert h.python_bin == ""
+
+
+def test_python_bin_is_settable(tmp_path):
+    import yaml as _yaml
+    from mmro.config import EXAMPLE_CONFIG_PATH as EX, load_config as lc
+    data = _yaml.safe_load(EX.read_text())
+    data["eval"]["harnesses"]["lmms_eval"]["python_bin"] = "python3.11"
+    p = tmp_path / "c.yaml"; p.write_text(_yaml.safe_dump(data))
+    assert lc(p).eval.harnesses["lmms_eval"].python_bin == "python3.11"

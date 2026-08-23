@@ -87,6 +87,22 @@ EOF
 
 archive_path() { echo "${ARCHIVE_DIR}/$1.tar"; }
 
+# VLMEvalKit's vendored Qwen2-VL/2.5-VL model class hardcodes
+# attn_implementation='flash_attention_2', which crashes at model load unless
+# flash-attn happens to be installed (it isn't, by default, in this venv --
+# see requirements/harness_vlmevalkit.txt). SDPA is an exact attention
+# implementation, just a different kernel, so this only trades speed/memory
+# for reliability; it does not change model outputs or the accuracy numbers
+# the harness reports. Idempotent, so safe to call on every setup run.
+patch_vlmevalkit_attn() {
+  local repo_dir="$1"
+  local target="$repo_dir/vlmeval/vlm/qwen2_vl/model.py"
+  if [[ -f "$target" ]] && grep -q "attn_implementation='flash_attention_2'" "$target"; then
+    echo "patching $target: attn_implementation flash_attention_2 -> sdpa (flash-attn not installed)"
+    sed -i "s/attn_implementation='flash_attention_2'/attn_implementation='sdpa'/g" "$target"
+  fi
+}
+
 # --- venv creation ----------------------------------------------------------
 # `python -m venv` fails on Colab often enough that one strategy is not enough.
 # The usual causes are environment rather than disk: Colab exports pip settings
@@ -299,6 +315,10 @@ setup_one() {
   # an unpinned re-clone months later will not reproduce these scores.
   mkdir -p "${REPO_ROOT}/results"
   git -C "$repo_dir" rev-parse HEAD > "${REPO_ROOT}/results/${name}_commit.txt" 2>/dev/null || true
+
+  if [[ "$name" == "vlmevalkit" ]]; then
+    patch_vlmevalkit_attn "$repo_dir"
+  fi
 
   if [[ -x "$venv/bin/python" ]]; then
     echo "venv already present: $venv"

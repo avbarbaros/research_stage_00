@@ -157,7 +157,14 @@ class HarnessBackend(ABC):
             "model_id": self.harness_cfg.model_id or model_cfg.repo_id,
             "model_path": model_cfg.repo_id,
             "max_new_tokens": decode.max_new_tokens,
-            "limit": self.cfg.eval.limit if self.cfg.eval.limit is not None else "",
+            # A ready CLI chunk, not a bare value: "" when unset so a template
+            # that appends {limit} bare (no --limit prefix of its own) gets
+            # nothing, and shlex.split drops the empty token cleanly. A bare
+            # number would leave a template's own "--limit {limit}" rendering
+            # as a dangling "--limit" with no value when limit is None.
+            "limit": (
+                "" if self.cfg.eval.limit is None else f"--limit {self.cfg.eval.limit}"
+            ),
         }
 
 

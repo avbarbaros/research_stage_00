@@ -202,10 +202,18 @@ eval:
       # in a separate comparison AFTER the gate passes.
       model_id: Qwen2.5-VL-7B-Instruct
       # Command template. Placeholders: {python} {repo_dir} {work_dir}
-      # {task_id} {task} {model_id} {model_path} {max_new_tokens} {limit}.
+      # {task_id} {task} {model_id} {model_path} {max_new_tokens}.
       # VERIFY against the VLMEvalKit README for your commit -- its CLI moves
       # between releases, and this is a string in config precisely so a change
       # there does not mean patching code.
+      #
+      # NOTE on eval.limit: VLMEvalKit's run.py has NO flag to cap the number of
+      # samples per dataset (checked against its current argparse -- --debug
+      # only changes process mode, not sample count). {limit} is deliberately
+      # NOT in this template because there is nothing to put it into; setting
+      # eval.limit has ZERO effect here and the full split always runs. lmms_eval
+      # (below) genuinely supports --limit, so use that harness for a quick
+      # shakeout, or pre-subset VLMEvalKit's cached TSV yourself.
       command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir}"
       # VLMEvalKit imports its whole dataset registry on `import vlmeval`, so a
       # single missing optional dep stops run.py before it reaches your task.
@@ -220,7 +228,10 @@ eval:
       repo_dir: /content/MMRM/src/lmms-eval
       work_dir: results/lmms_eval
       model_id: qwen2_5_vl
-      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir}"
+      # {limit} expands to "" when eval.limit is null, or "--limit N" when set
+      # -- lmms_eval's own CLI genuinely supports --limit (unlike VLMEvalKit's,
+      # see the note above), so this is the harness to use for a quick shakeout.
+      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir} {limit}"
       # Importing the model module is what fails (it pulls decord even for
       # image-only tasks), so probe that rather than just the package.
       import_probe: "import lmms_eval; import lmms_eval.models.simple.qwen2_5_vl"

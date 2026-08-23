@@ -40,6 +40,14 @@ class VLMEvalKitBackend(HarnessBackend):
         if problems:
             raise RuntimeError("; ".join(problems))
 
+        if self.cfg.eval.limit is not None:
+            print(
+                f"  NOTE: eval.limit={self.cfg.eval.limit} has NO effect on "
+                f"VLMEvalKit -- its run.py has no per-dataset sample cap, so the "
+                f"full {task.name} split will run regardless. Use lmms_eval for "
+                f"a quick shakeout."
+            )
+
         task_id = task.id_for(self.name)
         fields = self.command_fields(model_name, task)
         argv = self.harness_cfg.render_command(**fields)

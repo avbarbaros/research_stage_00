@@ -22,6 +22,7 @@ layout has moved across versions.
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 
 from ..config import TaskRow
@@ -47,6 +48,7 @@ class VLMEvalKitBackend(HarnessBackend):
                 f"full {task.name} split will run regardless. Use lmms_eval for "
                 f"a quick shakeout."
             )
+        self._warn_if_judge_unconfigured()
 
         task_id = task.id_for(self.name)
         fields = self.command_fields(model_name, task)
@@ -68,6 +70,30 @@ class VLMEvalKitBackend(HarnessBackend):
                 f"directory and widen ACCURACY_COLUMNS or the glob if so."
             )
         return records
+
+    def _warn_if_judge_unconfigured(self) -> None:
+        """Missing judge credentials don't crash this run -- they silently
+        degrade it. VLMEvalKit defaults to an OpenAI judge (e.g. gpt-4o-mini for
+        MCQ datasets) for MMMU/MathVista answer extraction whether or not
+        eval.judge is configured, reading its key from a ``.env`` file in the
+        VLMEvalKit repo (``load_env``) or the environment. Without a working
+        key, every judge call fails and it falls back to exact-match scoring --
+        which under-scores by tens of points -- and that only surfaces after
+        the multi-hour inference pass has already finished. Check up front and
+        say so loudly, rather than let that be discovered hours later.
+        """
+        key_env = self.cfg.eval.judge.api_key_env or "OPENAI_API_KEY"
+        env_file = self.harness_cfg.repo_path / ".env"
+        if os.environ.get(key_env) or env_file.exists():
+            return
+        print(
+            f"  WARNING: no ${key_env} in the environment and no {env_file} -- "
+            f"VLMEvalKit's judge calls for MMMU/MathVista answer extraction will "
+            f"likely fail and silently fall back to exact-match scoring (tens of "
+            f"points under baseline), discovered only after this run finishes. "
+            f"Fix before a gated run: create {env_file} with a line like "
+            f"OPENAI_API_KEY=sk-..."
+        )
 
     # -- parsing ------------------------------------------------------------
     def find_score_files(self, work: Path, task_id: str) -> list[Path]:

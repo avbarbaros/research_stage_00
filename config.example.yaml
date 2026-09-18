@@ -231,7 +231,7 @@ eval:
       # {limit} expands to "" when eval.limit is null, or "--limit N" when set
       # -- lmms_eval's own CLI genuinely supports --limit (unlike VLMEvalKit's,
       # see the note above), so this is the harness to use for a quick shakeout.
-      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --output_path {work_dir} {limit}"
+      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --write_out --output_path {work_dir} {limit}"
       # Importing the model module is what fails (it pulls decord even for
       # image-only tasks), so probe that rather than just the package.
       import_probe: "import lmms_eval; import lmms_eval.models.simple.qwen2_5_vl"
@@ -264,7 +264,7 @@ eval:
       max_images: 1                # single-image: gets the whole token budget
       baseline: 68.2
 
-  limit: null                      # cap samples per task for a quick shakeout;
+  limit: 25                      # cap samples per task for a quick shakeout;
                                    # MUST be null for a gated run
 
   # MMMU and MathVista open-ended items need LLM answer extraction, and the

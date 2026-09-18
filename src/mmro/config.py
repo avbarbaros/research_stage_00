@@ -351,6 +351,8 @@ class JudgeConfig:
             raise ConfigError(
                 f"eval.judge.model: required when backend is {self.backend!r}"
             )
+        if self.backend == "api" and not self.api_key_env:
+            self.api_key_env = "OPENAI_API_KEY"
 
 
 @dataclass

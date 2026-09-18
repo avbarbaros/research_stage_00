@@ -239,6 +239,7 @@ def test_no_diagnosis_when_the_gate_passes(cfg):
 
 def test_judge_is_named_first_when_unset(cfg):
     # The most common cause of a low score, and it is pure configuration.
+    cfg.eval.judge.backend = "none"
     notes = diagnose(cfg, check_gate(cfg, [score(value=60.0)]))
     assert "judge" in notes[0].lower()
 
@@ -292,3 +293,53 @@ def test_python_bin_is_settable(tmp_path):
     data["eval"]["harnesses"]["lmms_eval"]["python_bin"] = "python3.11"
     p = tmp_path / "c.yaml"; p.write_text(_yaml.safe_dump(data))
     assert lc(p).eval.harnesses["lmms_eval"].python_bin == "python3.11"
+
+
+# ---------------------------------------------------------------------------
+# Judge wiring
+# ---------------------------------------------------------------------------
+def _fields(cfg, harness):
+    return get_backend_class(harness)(cfg).command_fields(
+        "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+    )
+
+
+def test_api_judge_reaches_the_vlmevalkit_command(cfg):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    argv = cfg.eval.harnesses["vlmevalkit"].render_command(**_fields(cfg, "vlmevalkit"))
+    assert argv[argv.index("--judge") + 1] == "gpt-4o-mini"
+
+
+def test_no_judge_adds_no_flag(cfg):
+    cfg.eval.judge.backend = "none"
+    argv = cfg.eval.harnesses["vlmevalkit"].render_command(**_fields(cfg, "vlmevalkit"))
+    assert "--judge" not in argv
+
+
+def test_api_judge_without_a_key_is_a_hard_problem(cfg, monkeypatch):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    monkeypatch.delenv("MMRO_TEST_KEY", raising=False)
+    assert any("no key" in p for p in get_backend_class("lmms_eval")(cfg).judge_problems())
+
+
+def test_key_never_appears_in_argv_but_reaches_the_environment(cfg, monkeypatch):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    monkeypatch.setenv("MMRO_TEST_KEY", "sk-secret")
+    for name in ("vlmevalkit", "lmms_eval"):
+        backend = get_backend_class(name)(cfg)
+        argv = cfg.eval.harnesses[name].render_command(**_fields(cfg, name))
+        assert "sk-secret" not in " ".join(argv)
+        assert backend.judge_env()["OPENAI_API_KEY"] == "sk-secret"
+    assert get_backend_class("lmms_eval")(cfg).judge_env()["MODEL_VERSION"] == "gpt-4o-mini"
+
+
+def test_vlmevalkit_reads_its_key_from_dot_env(cfg, monkeypatch, tmp_path):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    cfg.eval.harnesses["vlmevalkit"].repo_dir = str(tmp_path)
+    backend = get_backend_class("vlmevalkit")(cfg)
+    assert not backend.judge_key_present()
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-abc\n")
+    assert backend.judge_key_present()

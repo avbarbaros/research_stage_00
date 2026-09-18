@@ -114,9 +114,14 @@ def test_ladder_must_be_descending(tmp_path, base_data):
 
 
 def test_judge_backend_requires_model(tmp_path, base_data):
-    base_data["eval"]["judge"]["backend"] = "api"
+    base_data["eval"]["judge"].update(backend="api", model=None)
     with pytest.raises(ConfigError, match="eval.judge.model"):
         load_config(write(tmp_path, base_data))
+
+
+def test_api_judge_defaults_its_key_env(tmp_path, base_data):
+    base_data["eval"]["judge"].update(backend="api", model="gpt-4o-mini", api_key_env=None)
+    assert load_config(write(tmp_path, base_data)).eval.judge.api_key_env == "OPENAI_API_KEY"
 
 
 def test_duplicate_task_names_rejected(tmp_path, base_data):

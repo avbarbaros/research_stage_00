@@ -31,6 +31,16 @@ NON_METRIC_KEYS = {"alias", "samples"}
 class LMMSEvalBackend(HarnessBackend):
     name = "lmms_eval"
 
+    def judge_env(self) -> dict[str, str]:
+        # lmms-eval takes its judge model and provider from the environment
+        # (MathVista reads MODEL_VERSION / API_TYPE), not from a CLI flag.
+        env = super().judge_env()
+        judge = self.cfg.eval.judge
+        if judge.backend != "none":
+            env["MODEL_VERSION"] = str(judge.model)
+            env.setdefault("API_TYPE", "openai")
+        return env
+
     def run(self, model_name: str, task: TaskRow) -> list[ScoreRecord]:
         problems = self.check_available()
         if problems:

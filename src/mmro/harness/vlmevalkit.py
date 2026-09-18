@@ -71,28 +71,33 @@ class VLMEvalKitBackend(HarnessBackend):
             )
         return records
 
-    def _warn_if_judge_unconfigured(self) -> None:
-        """Missing judge credentials don't crash this run -- they silently
-        degrade it. VLMEvalKit defaults to an OpenAI judge (e.g. gpt-4o-mini for
-        MCQ datasets) for MMMU/MathVista answer extraction whether or not
-        eval.judge is configured, reading its key from a ``.env`` file in the
-        VLMEvalKit repo (``load_env``) or the environment. Without a working
-        key, every judge call fails and it falls back to exact-match scoring --
-        which under-scores by tens of points -- and that only surfaces after
-        the multi-hour inference pass has already finished. Check up front and
-        say so loudly, rather than let that be discovered hours later.
-        """
-        key_env = self.cfg.eval.judge.api_key_env or "OPENAI_API_KEY"
+    def judge_key_present(self) -> bool:
+        # VLMEvalKit also loads its key from a .env file in its own repo.
+        if super().judge_key_present():
+            return True
         env_file = self.harness_cfg.repo_path / ".env"
-        if os.environ.get(key_env) or env_file.exists():
+        key_env = self.cfg.eval.judge.api_key_env
+        if not (key_env and env_file.exists()):
+            return False
+        prefix = f"{key_env}="
+        return any(
+            line.strip().startswith(prefix) and line.split("=", 1)[1].strip()
+            for line in env_file.read_text(encoding="utf-8").splitlines()
+        )
+
+    def _warn_if_judge_unconfigured(self) -> None:
+        """With eval.judge.backend 'none' VLMEvalKit still tries its own default
+        OpenAI judge for MMMU/MathVista, and falls back silently to exact-match
+        scoring when there is no key. Say so before hours of inference."""
+        if self.cfg.eval.judge.backend != "none":
+            return
+        env_file = self.harness_cfg.repo_path / ".env"
+        if os.environ.get("OPENAI_API_KEY") or env_file.exists():
             return
         print(
-            f"  WARNING: no ${key_env} in the environment and no {env_file} -- "
-            f"VLMEvalKit's judge calls for MMMU/MathVista answer extraction will "
-            f"likely fail and silently fall back to exact-match scoring (tens of "
-            f"points under baseline), discovered only after this run finishes. "
-            f"Fix before a gated run: create {env_file} with a line like "
-            f"OPENAI_API_KEY=sk-..."
+            "  WARNING: eval.judge.backend is 'none' and no OPENAI_API_KEY / "
+            f"{env_file} exists -- VLMEvalKit will likely fall back to exact-match "
+            "scoring (tens of points under baseline). Set eval.judge for a gated run."
         )
 
     # -- parsing ------------------------------------------------------------

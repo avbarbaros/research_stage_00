@@ -202,7 +202,9 @@ eval:
       # in a separate comparison AFTER the gate passes.
       model_id: Qwen2.5-VL-7B-Instruct
       # Command template. Placeholders: {python} {repo_dir} {work_dir}
-      # {task_id} {task} {model_id} {model_path} {max_new_tokens}.
+      # {task_id} {task} {model_id} {model_path} {max_new_tokens} {judge}.
+      # {judge} expands to "--judge MODEL" when eval.judge is set, else "". The
+      # key is passed through the environment, never on this command line.
       # VERIFY against the VLMEvalKit README for your commit -- its CLI moves
       # between releases, and this is a string in config precisely so a change
       # there does not mean patching code.
@@ -214,7 +216,7 @@ eval:
       # eval.limit has ZERO effect here and the full split always runs. lmms_eval
       # (below) genuinely supports --limit, so use that harness for a quick
       # shakeout, or pre-subset VLMEvalKit's cached TSV yourself.
-      command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir}"
+      command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir} {judge}"
       # VLMEvalKit imports its whole dataset registry on `import vlmeval`, so a
       # single missing optional dep stops run.py before it reaches your task.
       # The setup script runs this and resolves what is missing in one pass.
@@ -272,6 +274,11 @@ eval:
   # to rule-based matching, which systematically under-scores -- often by more
   # than the 2-point gate allows. Set this before a gated run.
   judge:
-    backend: none                  # none | api | local
-    model: null                    # e.g. gpt-4o-mini, or a local model id
-    api_key_env: null              # env var holding the key, e.g. OPENAI_API_KEY
+    backend: api                   # none | api | local
+    model: gpt-4o-mini             # VLMEvalKit's own default judge for MCQ datasets
+    # NAME of the env var holding the key (not the key itself). Export it in the
+    # shell that runs mmro.eval, e.g.  export OPENAI_API_KEY=sk-...
+    # VLMEvalKit additionally accepts it from <repo_dir>/.env. The run refuses
+    # to start if backend is api and no key is found.
+    api_key_env: OPENAI_API_KEY
+#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

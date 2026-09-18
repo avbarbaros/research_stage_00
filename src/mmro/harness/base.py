@@ -22,6 +22,7 @@ Explaining a delta is stage-0.2 research output; hiding it would be a bug.
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 from abc import ABC, abstractmethod
@@ -114,7 +115,41 @@ class HarnessBackend(ABC):
                 f"{self.name} venv is missing: {self.harness_cfg.venv_path} "
                 f"(create it with scripts/03_setup_harness.sh)"
             )
+        problems.extend(self.judge_problems())
         return problems
+
+    # -- judge --------------------------------------------------------------
+    # MMMU/MathVista answer extraction uses an LLM judge; published numbers were
+    # produced with it. With no working key the harness does not crash, it
+    # silently falls back to rule-based matching and under-scores by tens of
+    # points -- discovered only after hours of inference. So an api judge with
+    # no key is a hard failure here, before anything is launched.
+    def judge_key_present(self) -> bool:
+        """Whether the api judge's key is reachable. Backends may add sources."""
+        key_env = self.cfg.eval.judge.api_key_env
+        return bool(key_env and os.environ.get(key_env))
+
+    def judge_problems(self) -> list[str]:
+        judge = self.cfg.eval.judge
+        if judge.backend != "api" or self.judge_key_present():
+            return []
+        return [
+            f"eval.judge.backend is 'api' but no key was found: export "
+            f"{judge.api_key_env} in the shell that runs mmro.eval"
+        ]
+
+    def judge_env(self) -> dict[str, str]:
+        """Environment overrides that hand the judge config to the harness.
+
+        The key travels through the environment, never argv: argv is echoed to
+        the terminal and the run log.
+        """
+        judge = self.cfg.eval.judge
+        if judge.backend != "api":
+            return {}
+        key = os.environ.get(judge.api_key_env or "")
+        # Harnesses expect the conventional name whatever ours is called.
+        return {"OPENAI_API_KEY": key} if key else {}
 
     def decode_echo(self) -> dict:
         """Decoding settings recorded on every score.
@@ -135,7 +170,11 @@ class HarnessBackend(ABC):
         print(f"  log: {log_path}")
         with log_path.open("w", encoding="utf-8") as log:
             proc = subprocess.Popen(
-                argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env={**os.environ, **self.judge_env()},
             )
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -162,6 +201,13 @@ class HarnessBackend(ABC):
             # nothing, and shlex.split drops the empty token cleanly. A bare
             # number would leave a template's own "--limit {limit}" rendering
             # as a dangling "--limit" with no value when limit is None.
+            # "--judge MODEL" for VLMEvalKit's CLI, "" when no judge is configured
+            # so the harness keeps its own default.
+            "judge": (
+                ""
+                if self.cfg.eval.judge.backend == "none"
+                else f"--judge {self.cfg.eval.judge.model}"
+            ),
             "limit": (
                 "" if self.cfg.eval.limit is None else f"--limit {self.cfg.eval.limit}"
             ),

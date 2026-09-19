@@ -281,4 +281,3 @@ eval:
     # VLMEvalKit additionally accepts it from <repo_dir>/.env. The run refuses
     # to start if backend is api and no key is found.
     api_key_env: OPENAI_API_KEY
-#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

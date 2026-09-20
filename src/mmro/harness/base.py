@@ -120,8 +120,8 @@ class HarnessBackend(ABC):
         """Interpreter for this harness's isolated venv."""
         return self.harness_cfg.python
 
-    def check_available(self) -> list[str]:
-        """Problems that would stop this backend from running."""
+    def check_available(self, task: TaskRow | None = None) -> list[str]:
+        """Problems that would stop this backend from running ``task``."""
         problems = []
         if not self.harness_cfg.enabled:
             problems.append(f"{self.name} is disabled in config.eval.harnesses")
@@ -130,7 +130,7 @@ class HarnessBackend(ABC):
                 f"{self.name} venv is missing: {self.harness_cfg.venv_path} "
                 f"(create it with scripts/03_setup_harness.sh)"
             )
-        problems.extend(self.judge_problems())
+        problems.extend(self.judge_problems(task))
         return problems
 
     # -- judge --------------------------------------------------------------
@@ -144,8 +144,10 @@ class HarnessBackend(ABC):
         key_env = self.cfg.eval.judge.api_key_env
         return bool(key_env and os.environ.get(key_env))
 
-    def judge_problems(self) -> list[str]:
+    def judge_problems(self, task: TaskRow | None = None) -> list[str]:
         judge = self.cfg.eval.judge
+        if task is not None and not task.needs_judge(self.name):
+            return []  # rule-based scoring in this harness: no judge to require
         if judge.backend != "api" or self.judge_key_present():
             return []
         return [

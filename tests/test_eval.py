@@ -353,3 +353,40 @@ def test_model_path_is_the_verified_local_copy_once_resolved(cfg, tmp_path):
     assert backend.command_fields("qwen2_5_vl_7b", task)["model_path"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     backend.model_paths["qwen2_5_vl_7b"] = tmp_path / "staged"
     assert backend.command_fields("qwen2_5_vl_7b", task)["model_path"] == str(tmp_path / "staged")
+
+
+# ---------------------------------------------------------------------------
+# Judge requirement is per task and harness
+# ---------------------------------------------------------------------------
+def test_judge_free_task_needs_no_key(cfg, monkeypatch):
+    # lmms-eval scores mmmu_val by rule-based parsing, so an api judge with no
+    # key must not block it.
+    monkeypatch.delenv("MMRO_TEST_KEY", raising=False)
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    backend = get_backend_class("lmms_eval")(cfg)
+    assert backend.judge_problems(cfg.eval.task("mmmu_val")) == []
+
+
+def test_judged_tasks_still_require_a_key(cfg, monkeypatch):
+    monkeypatch.delenv("MMRO_TEST_KEY", raising=False)
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    lmms = get_backend_class("lmms_eval")(cfg)
+    vlm = get_backend_class("vlmevalkit")(cfg)
+    assert lmms.judge_problems(cfg.eval.task("mathvista_testmini"))  # judged
+    assert vlm.judge_problems(cfg.eval.task("mmmu_val"))  # only lmms_eval is judge-free
+    assert lmms.judge_problems()  # no task given: stay strict
+
+
+def test_judge_free_is_validated(cfg):
+    from mmro.config import TaskRow
+
+    with pytest.raises(ConfigError, match="judge_free"):
+        TaskRow(name="t", lmms_eval="t", judge_free=["nope"])
+
+
+def test_diagnose_skips_the_judge_note_for_judge_free_failures(cfg):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "none", None
+    notes = " ".join(diagnose(cfg, check_gate(cfg, [score(task="mmmu_val", harness="lmms_eval", value=40.0)])))
+    assert "judge.backend is 'none'" not in notes

@@ -42,7 +42,7 @@ class LMMSEvalBackend(HarnessBackend):
         return env
 
     def run(self, model_name: str, task: TaskRow) -> list[ScoreRecord]:
-        problems = self.check_available()
+        problems = self.check_available(task)
         if problems:
             raise RuntimeError("; ".join(problems))
 

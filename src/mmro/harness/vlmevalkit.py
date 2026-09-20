@@ -37,7 +37,7 @@ class VLMEvalKitBackend(HarnessBackend):
     name = "vlmevalkit"
 
     def run(self, model_name: str, task: TaskRow) -> list[ScoreRecord]:
-        problems = self.check_available()
+        problems = self.check_available(task)
         if problems:
             raise RuntimeError("; ".join(problems))
 
@@ -48,7 +48,7 @@ class VLMEvalKitBackend(HarnessBackend):
                 f"full {task.name} split will run regardless. Use lmms_eval for "
                 f"a quick shakeout."
             )
-        self._warn_if_judge_unconfigured()
+        self._warn_if_judge_unconfigured(task)
 
         task_id = task.id_for(self.name)
         fields = self.command_fields(model_name, task)
@@ -85,11 +85,11 @@ class VLMEvalKitBackend(HarnessBackend):
             for line in env_file.read_text(encoding="utf-8").splitlines()
         )
 
-    def _warn_if_judge_unconfigured(self) -> None:
+    def _warn_if_judge_unconfigured(self, task: TaskRow) -> None:
         """With eval.judge.backend 'none' VLMEvalKit still tries its own default
         OpenAI judge for MMMU/MathVista, and falls back silently to exact-match
         scoring when there is no key. Say so before hours of inference."""
-        if self.cfg.eval.judge.backend != "none":
+        if self.cfg.eval.judge.backend != "none" or not task.needs_judge(self.name):
             return
         env_file = self.harness_cfg.repo_path / ".env"
         if os.environ.get("OPENAI_API_KEY") or env_file.exists():

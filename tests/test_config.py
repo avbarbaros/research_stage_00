@@ -261,3 +261,9 @@ def test_invalid_yaml_reports_clearly(tmp_path):
     """))
     with pytest.raises(ConfigError, match="invalid YAML"):
         load_config(path)
+
+
+def test_local_judge_is_rejected_until_implemented(tmp_path, base_data):
+    base_data["eval"]["judge"].update(backend="local", model="Qwen/Qwen2.5-7B-Instruct")
+    with pytest.raises(ConfigError, match="not implemented"):
+        load_config(write(tmp_path, base_data))

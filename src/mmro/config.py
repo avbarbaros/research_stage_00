@@ -319,14 +319,32 @@ class TaskRow:
     # our result against this. Null means "no published number to check against".
     baseline: float | None = None
 
+    # Harnesses whose scoring of THIS task is rule-based, i.e. never calls an LLM
+    # judge. Only those runs may proceed with no judge configured; everything
+    # else still fails fast without one. Empty by default: assuming a task needs
+    # no judge when it does is the expensive mistake (hours of inference, then a
+    # score tens of points low), so this must be opted into per harness.
+    judge_free: list[str] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         _check_int(f"eval.tasks[{self.name}].max_images", self.max_images, minimum=1)
+        if not isinstance(self.judge_free, list):
+            raise ConfigError(
+                f"eval.tasks[{self.name}].judge_free: expected a list of harness "
+                f"names, got {self.judge_free!r}"
+            )
+        for harness in self.judge_free:
+            _check_enum(f"eval.tasks[{self.name}].judge_free", harness, KNOWN_HARNESSES)
         if self.baseline is not None:
             if not isinstance(self.baseline, (int, float)) or isinstance(self.baseline, bool):
                 raise ConfigError(
                     f"eval.tasks[{self.name}].baseline: expected a number, "
                     f"got {self.baseline!r}"
                 )
+
+    def needs_judge(self, harness: str) -> bool:
+        """Whether ``harness`` scores this task with an LLM judge."""
+        return harness not in self.judge_free
 
     def id_for(self, harness: str) -> str:
         _check_enum("harness", harness, KNOWN_HARNESSES)
@@ -350,6 +368,16 @@ class JudgeConfig:
         if self.backend != "none" and not self.model:
             raise ConfigError(
                 f"eval.judge.model: required when backend is {self.backend!r}"
+            )
+        if self.backend == "local":
+            # Accepted by the enum so the message below can be specific, but not
+            # wired to anything yet. Letting it through would pass `--judge` to
+            # the harness with no endpoint, which silently falls back to OpenAI
+            # or to rule-based matching and under-scores without an error.
+            raise ConfigError(
+                "eval.judge.backend: 'local' is not implemented yet. Use 'api', "
+                "or 'none' for runs whose tasks are judge-free "
+                "(see eval.tasks[].judge_free)"
             )
         if self.backend == "api" and not self.api_key_env:
             self.api_key_env = "OPENAI_API_KEY"

@@ -85,7 +85,8 @@ def diagnose(cfg: Config, gate: list[GateResult]) -> list[str]:
     if not failures:
         return notes
 
-    if cfg.eval.judge.backend == "none":
+    needs_judge = any(cfg.eval.task(g.task).needs_judge(g.harness) for g in failures)
+    if cfg.eval.judge.backend == "none" and needs_judge:
         notes.append(
             "eval.judge.backend is 'none'. MathVista and MMMU's open-ended items "
             "need LLM answer extraction; published numbers use it. Rule-based "

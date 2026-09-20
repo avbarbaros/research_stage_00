@@ -258,6 +258,12 @@ eval:
       vlmevalkit: MMMU_DEV_VAL     # NOTE: spans dev+validation
       lmms_eval: mmmu_val          # NOTE: validation only -- a real split
                                    # difference, and a likely source of delta
+      # lmms-eval scores mmmu_val with rule-based parsing (no LLM judge), so
+      # that run needs no judge/key. Verified against upstream lmms-eval main;
+      # re-check in your checkout with:
+      #   grep -n "OpenAI\|API_TYPE\|get_server" <repo_dir>/lmms_eval/tasks/mmmu/utils.py
+      # VLMEvalKit's MMMU does use the judge, so it is NOT listed here.
+      judge_free: [lmms_eval]
       max_images: 7
       baseline: 58.6
     - name: mathvista_testmini
@@ -273,8 +279,10 @@ eval:
   # published numbers were produced WITH it. Leaving this at 'none' falls back
   # to rule-based matching, which systematically under-scores -- often by more
   # than the 2-point gate allows. Set this before a gated run.
+  # Runs of a task/harness listed in that task's judge_free need no judge at
+  # all; for everything else an unusable judge is a hard error before launch.
   judge:
-    backend: api                   # none | api | local
+    backend: api                   # none | api   ('local' is rejected: not built yet)
     model: gpt-4o-mini             # VLMEvalKit's own default judge for MCQ datasets
     # NAME of the env var holding the key (not the key itself). Export it in the
     # shell that runs mmro.eval, e.g.  export OPENAI_API_KEY=sk-...

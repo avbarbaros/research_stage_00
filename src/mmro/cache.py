@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,54 @@ def _dir_gb(path: Path) -> float:
     return total / (1024**3)
 
 
+# safetensors itself refuses headers above this size ("header too large").
+_MAX_HEADER_BYTES = 100_000_000
+
+
+def check_shard(path: Path) -> str | None:
+    """Why ``path`` is not a loadable safetensors file, or None if it is.
+
+    Reads only the 8-byte length prefix and the JSON header, so it is cheap even
+    for a 4GB shard on Drive. It catches what a name-and-existence check cannot:
+    a zero-byte or LFS-pointer file, garbage from a botched Drive write, and a
+    truncated download whose tensor data ends short of what the header declares.
+    ``from_pretrained`` reports all of these as the unhelpful "header too large".
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            prefix = fh.read(8)
+            if len(prefix) < 8:
+                return f"{path.name}: only {size} bytes (empty or truncated)"
+            (header_len,) = struct.unpack("<Q", prefix)
+            if header_len > _MAX_HEADER_BYTES or 8 + header_len > size:
+                return (
+                    f"{path.name}: header length {header_len} is impossible for a "
+                    f"{size}-byte file (corrupt, or not a safetensors file)"
+                )
+            try:
+                header = json.loads(fh.read(header_len))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return f"{path.name}: header is not valid JSON (corrupt)"
+    except OSError as exc:
+        return f"{path.name}: unreadable ({exc})"
+
+    ends = [
+        v["data_offsets"][1]
+        for k, v in header.items()
+        if k != "__metadata__" and isinstance(v, dict) and "data_offsets" in v
+    ]
+    expected = 8 + header_len + (max(ends) if ends else 0)
+    if size < expected:
+        return f"{path.name}: {size} bytes on disk but the header declares {expected} (truncated)"
+    return None
+
+
+def corrupt_shards(path: Path) -> dict[Path, str]:
+    """Shards under ``path`` that fail :func:`check_shard`, with the reason."""
+    return {s: why for s in _shards(path) if (why := check_shard(s))}
+
+
 def verify_snapshot(path: Path) -> tuple[bool, list[str]]:
     """Check a snapshot looks complete.
 
@@ -88,6 +137,9 @@ def verify_snapshot(path: Path) -> tuple[bool, list[str]]:
                     f"{missing[:3]}{'...' if len(missing) > 3 else ''}"
                 )
 
+    for why in corrupt_shards(path).values():
+        problems.append(f"corrupt shard: {why}")
+
     # An interrupted hf_hub download leaves .incomplete files behind.
     incomplete = list(path.rglob("*.incomplete"))
     if incomplete:
@@ -100,13 +152,30 @@ def fetch(cfg: Config, model: ModelConfig, force: bool = False) -> FetchResult:
     """Download a model snapshot, then stage it to local disk."""
     from huggingface_hub import snapshot_download  # noqa: PLC0415
 
-    snapshot = Path(
-        snapshot_download(
-            repo_id=model.repo_id,
-            allow_patterns=ALLOW_PATTERNS,
-            max_workers=4,
+    def download() -> Path:
+        # resuming is the default now; passing resume_download only warns
+        return Path(
+            snapshot_download(
+                repo_id=model.repo_id,
+                allow_patterns=ALLOW_PATTERNS,
+                max_workers=4,
+            )
         )
-    )  # resuming is the default now; passing resume_download only warns
+
+    snapshot = download()
+
+    # snapshot_download trusts any file already in the cache, so a corrupt shard
+    # is "downloaded" in two seconds and only fails at load time. Drop the bad
+    # blobs and pull them again.
+    bad = corrupt_shards(snapshot)
+    if bad:
+        for shard, why in bad.items():
+            print(f"  repairing {why}")
+            blob = shard.resolve()
+            shard.unlink(missing_ok=True)
+            if blob != shard:
+                blob.unlink(missing_ok=True)
+        snapshot = download()
 
     ok, problems = verify_snapshot(snapshot)
     result = FetchResult(
@@ -199,9 +268,36 @@ def resolve_load_path(cfg: Config, model: ModelConfig) -> tuple[Path, str, bool]
                 local_files_only=True,
             )
         )
+        cache_ok, cache_problems = verify_snapshot(cached)
+        if not cache_ok:
+            return (
+                Path(model.repo_id),
+                f"HF cache is unusable ({'; '.join(cache_problems)}); "
+                f"run scripts/00_fetch_weights.sh to repair",
+                False,
+            )
         return cached, f"HF cache ({detail})", not cfg.paths.caching_on_drive
     except Exception:
         return Path(model.repo_id), f"repo ID, will download ({detail})", False
+
+
+def ensure_local(cfg: Config, model: ModelConfig) -> Path:
+    """A verified local path for ``model``, fetching or repairing if needed.
+
+    For harnesses that load weights in a subprocess of their own: handed a bare
+    repo ID they would re-resolve it against the HF cache and trip on whatever
+    is corrupt in it. Handed this path they read the staged, verified copy.
+    """
+    path, _, _ = resolve_load_path(cfg, model)
+    if path.exists() and verify_snapshot(path)[0]:
+        return path
+    result = fetch(cfg, model)
+    if not result.staged:
+        raise RuntimeError(
+            f"weights for {model.name} are unusable after a repair attempt: "
+            f"{'; '.join(result.warnings)}"
+        )
+    return Path(result.staged_dir)
 
 
 def local_path(cfg: Config, model: ModelConfig, announce: bool = True) -> Path:

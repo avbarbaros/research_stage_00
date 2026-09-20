@@ -15,12 +15,21 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 
 import pytest
 import yaml
 
-from mmro.cache import resolve_load_path, stage_to_local, verify_snapshot
+from mmro.cache import check_shard, resolve_load_path, stage_to_local, verify_snapshot
 from mmro.config import EXAMPLE_CONFIG_PATH, load_config
+
+
+def safetensors_bytes(payload_size: int) -> bytes:
+    """A minimal valid safetensors file: one uint8 tensor of ``payload_size``."""
+    header = json.dumps(
+        {"w": {"dtype": "U8", "shape": [payload_size], "data_offsets": [0, payload_size]}}
+    ).encode()
+    return struct.pack("<Q", len(header)) + header + b"\0" * payload_size
 
 
 def make_hub_snapshot(root, shards=2, blob_size=2048):
@@ -37,7 +46,7 @@ def make_hub_snapshot(root, shards=2, blob_size=2048):
     link("cfg", "config.json", json.dumps({"model_type": "test"}).encode())
     names = [f"model-{i:05d}-of-{shards:05d}.safetensors" for i in range(1, shards + 1)]
     for i, name in enumerate(names):
-        link(f"blob{i}", name, b"\0" * blob_size)
+        link(f"blob{i}", name, safetensors_bytes(blob_size))
     link(
         "idx",
         "model.safetensors.index.json",
@@ -83,7 +92,7 @@ def test_staged_copy_holds_the_real_weights(cfg, tmp_path):
 
     shards = sorted(staged.glob("*.safetensors"))
     assert len(shards) == 3
-    assert all(s.read_bytes() == b"\0" * 4096 for s in shards)
+    assert all(s.read_bytes() == safetensors_bytes(4096) for s in shards)
     assert json.loads((staged / "config.json").read_text())["model_type"] == "test"
     assert staged.name == model.stage_name
 
@@ -157,6 +166,37 @@ def test_missing_config_is_caught(tmp_path):
 def test_absent_directory_is_caught(tmp_path):
     ok, problems = verify_snapshot(tmp_path / "nothing")
     assert not ok and problems
+
+
+# --- corrupt shards: the "header too large" failure --------------------------
+def test_valid_shard_passes(tmp_path):
+    f = tmp_path / "ok.safetensors"
+    f.write_bytes(safetensors_bytes(512))
+    assert check_shard(f) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"",                                                    # zero-byte file
+        b"version https://git-lfs.github.com/spec/v1\noid sha256:0\nsize 1\n",  # LFS pointer
+        b"\xff" * 4096,                                          # garbage
+        safetensors_bytes(512)[:-100],                          # truncated tensor data
+    ],
+    ids=["empty", "lfs-pointer", "garbage", "truncated"],
+)
+def test_corrupt_shard_is_caught(tmp_path, payload):
+    f = tmp_path / "bad.safetensors"
+    f.write_bytes(payload)
+    assert check_shard(f)
+
+
+def test_snapshot_with_a_corrupt_shard_fails_verification(tmp_path):
+    snapshot = make_hub_snapshot(tmp_path / "hub")
+    (tmp_path / "hub" / "blobs" / "blob1").write_bytes(b"\xff" * 4096)
+    ok, problems = verify_snapshot(snapshot)
+    assert not ok
+    assert any("corrupt shard" in p for p in problems)
 
 
 # --- load-path resolution must be honest about speed ------------------------

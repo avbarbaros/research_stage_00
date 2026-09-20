@@ -90,6 +90,8 @@ class HarnessBackend(ABC):
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        # model name -> verified local weights, filled by ensure_weights().
+        self.model_paths: dict[str, Path] = {}
         self.harness_cfg = cfg.eval.harnesses.get(self.name)
         if self.harness_cfg is None:
             raise ConfigError(
@@ -101,6 +103,19 @@ class HarnessBackend(ABC):
         """Run ``task`` against ``model_name``, returning normalized scores."""
 
     # -- shared helpers -----------------------------------------------------
+    def ensure_weights(self, model_name: str) -> Path:
+        """Verify (repairing if needed) the weights and remember where they are.
+
+        Feeds ``{model_path}`` in the command template, so the harness loads the
+        checked local copy instead of resolving the repo ID into a cache that may
+        hold a corrupt shard.
+        """
+        from .. import cache  # noqa: PLC0415
+
+        path = cache.ensure_local(self.cfg, self.cfg.model(model_name))
+        self.model_paths[model_name] = path
+        return path
+
     def python(self) -> Path:
         """Interpreter for this harness's isolated venv."""
         return self.harness_cfg.python
@@ -194,7 +209,7 @@ class HarnessBackend(ABC):
             "task_id": task.id_for(self.name),
             "task": task.name,
             "model_id": self.harness_cfg.model_id or model_cfg.repo_id,
-            "model_path": model_cfg.repo_id,
+            "model_path": str(self.model_paths.get(model_name, model_cfg.repo_id)),
             "max_new_tokens": decode.max_new_tokens,
             # A ready CLI chunk, not a bare value: "" when unset so a template
             # that appends {limit} bare (no --limit prefix of its own) gets

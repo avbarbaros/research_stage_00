@@ -47,6 +47,7 @@ class LMMSEvalBackend(HarnessBackend):
             raise RuntimeError("; ".join(problems))
 
         task_id = task.id_for(self.name)
+        self.ensure_weights(model_name)
         fields = self.command_fields(model_name, task)
         argv = self.harness_cfg.render_command(**fields)
 

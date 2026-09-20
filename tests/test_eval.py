@@ -343,3 +343,13 @@ def test_vlmevalkit_reads_its_key_from_dot_env(cfg, monkeypatch, tmp_path):
     assert not backend.judge_key_present()
     (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-abc\n")
     assert backend.judge_key_present()
+
+
+def test_model_path_is_the_verified_local_copy_once_resolved(cfg, tmp_path):
+    # Handing lmms-eval the bare repo ID makes it re-resolve into the HF cache,
+    # which is where a corrupt shard hides ("header too large").
+    backend = get_backend_class("lmms_eval")(cfg)
+    task = cfg.eval.task("mmmu_val")
+    assert backend.command_fields("qwen2_5_vl_7b", task)["model_path"] == "Qwen/Qwen2.5-VL-7B-Instruct"
+    backend.model_paths["qwen2_5_vl_7b"] = tmp_path / "staged"
+    assert backend.command_fields("qwen2_5_vl_7b", task)["model_path"] == str(tmp_path / "staged")

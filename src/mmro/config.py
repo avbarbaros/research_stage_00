@@ -161,10 +161,42 @@ class ModelConfig:
     trust_remote_code: bool = False
     budget: dict[str, Any] = field(default_factory=dict)
 
+    # The name each eval harness knows THIS model by, e.g.
+    #   {vlmevalkit: Qwen2.5-VL-7B-Instruct, lmms_eval: qwen2_5_vl}
+    # Per model, never per harness: a harness-wide name would run the same model
+    # for every entry in the registry and label the score with the wrong one.
+    harness_ids: dict[str, str] = field(default_factory=dict)
+
+    # Published score per task (task name -> percent) for THIS model, which the
+    # gate compares against. Per model because a benchmark score belongs to a
+    # model: one number per task would gate every registered model against
+    # whichever model's score happened to be written down. Null (or absent)
+    # means "no published number", and the gate says so instead of guessing.
+    baselines: dict[str, float | None] = field(default_factory=dict)
+
     # Populated by the loader; not a YAML key.
     name: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.harness_ids, dict):
+            raise ConfigError(f"models.{self.name}.harness_ids: expected a mapping")
+        for harness, model_id in self.harness_ids.items():
+            _check_enum(f"models.{self.name}.harness_ids", harness, KNOWN_HARNESSES)
+            if not isinstance(model_id, str) or not model_id:
+                raise ConfigError(
+                    f"models.{self.name}.harness_ids.{harness}: expected a "
+                    f"non-empty string, got {model_id!r}"
+                )
+        if not isinstance(self.baselines, dict):
+            raise ConfigError(f"models.{self.name}.baselines: expected a mapping")
+        for task, value in self.baselines.items():
+            if value is not None and (
+                not isinstance(value, (int, float)) or isinstance(value, bool)
+            ):
+                raise ConfigError(
+                    f"models.{self.name}.baselines.{task}: expected a number or "
+                    f"null, got {value!r}"
+                )
         if self.adapter not in BUDGET_KEYS:
             raise ConfigError(
                 f"models.{self.name}.adapter: unknown adapter {self.adapter!r}; "
@@ -242,7 +274,7 @@ class HarnessConfig:
     work_dir: str = ""
     repo: str = ""          # git URL, cloned by scripts/03_setup_harness.sh
     repo_dir: str = ""      # where the clone lives
-    model_id: str = ""      # the harness's OWN name for the model
+    model_id: str = ""      # REMOVED: now models.<name>.harness_ids; see __post_init__
     command: str = ""       # command template; see `render_command`
     # A statement that imports what the harness needs to run our tasks. The
     # setup script executes it after installing and reports (or auto-installs)
@@ -258,6 +290,12 @@ class HarnessConfig:
 
     def __post_init__(self) -> None:
         _check_bool(f"eval.harnesses.{self.name}.enabled", self.enabled)
+        if self.model_id:
+            raise ConfigError(
+                f"eval.harnesses.{self.name}.model_id: moved to the model registry. "
+                f"Set models.<name>.harness_ids.{self.name} instead -- one harness-wide "
+                f"name would run the same model for every registered model."
+            )
 
     @property
     def venv_path(self) -> Path:
@@ -315,8 +353,7 @@ class TaskRow:
     # and scores below its published number for a reason that is our doing.
     max_images: int = 1
 
-    # Published score for the reference model, as a percentage. The gate compares
-    # our result against this. Null means "no published number to check against".
+    # REMOVED: now models.<name>.baselines.<task>; see __post_init__.
     baseline: float | None = None
 
     # Harnesses whose scoring of THIS task is rule-based, i.e. never calls an LLM
@@ -336,11 +373,12 @@ class TaskRow:
         for harness in self.judge_free:
             _check_enum(f"eval.tasks[{self.name}].judge_free", harness, KNOWN_HARNESSES)
         if self.baseline is not None:
-            if not isinstance(self.baseline, (int, float)) or isinstance(self.baseline, bool):
-                raise ConfigError(
-                    f"eval.tasks[{self.name}].baseline: expected a number, "
-                    f"got {self.baseline!r}"
-                )
+            raise ConfigError(
+                f"eval.tasks[{self.name}].baseline: moved to the model registry. "
+                f"Set models.<name>.baselines.{self.name} instead -- a published "
+                f"score belongs to a model, and one per task gates every model "
+                f"against the same number."
+            )
 
     def needs_judge(self, harness: str) -> bool:
         """Whether ``harness`` scores this task with an LLM judge."""

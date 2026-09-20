@@ -56,6 +56,19 @@ models:
     enabled: true
     adapter: qwen25vl
     repo_id: Qwen/Qwen2.5-VL-7B-Instruct
+    # The harness's OWN registered name for this model. For the gate we run the
+    # harness's own implementation, because that is what produced the published
+    # numbers; swapping in our adapter adds a variable and belongs in a separate
+    # comparison AFTER the gate passes.
+    harness_ids:
+      vlmevalkit: Qwen2.5-VL-7B-Instruct
+      lmms_eval: qwen2_5_vl
+    # Published scores in percent, which the stage-0.2 gate compares against.
+    #   *** VERIFY THESE against the official model card before trusting the gate.
+    #   A wrong baseline turns the gate into noise in either direction. ***
+    baselines:
+      mmmu_val: 58.6
+      mathvista_testmini: 68.2
     budget:
       # 1 visual token = a 28x28 px block (14px patch, 2x2 merge).
       # qwen-vl-utils defaults to 16384 tokens for ONE image; we always set this
@@ -83,6 +96,23 @@ models:
     enabled: true
     adapter: internvl3_hf
     repo_id: OpenGVLab/InternVL3-8B-hf
+    harness_ids:
+      # VLMEvalKit registers InternVL3-8B with its own hard-coded
+      # model_path OpenGVLab/InternVL3-8B (the NATIVE checkpoint), so it
+      # ignores {model_path} and downloads a second ~16GB copy, and runs a
+      # different implementation than our -hf adapter.
+      vlmevalkit: InternVL3-8B
+      # lmms-eval has both `internvl3` (native, trust_remote_code) and
+      # `internvl_hf` (transformers-native). The -hf checkpoint we stage
+      # goes with internvl_hf.
+      lmms_eval: internvl_hf
+    # Deliberately null: the InternVL3-8B model card gives these only as images,
+    # so they cannot be copied reliably from here. Fill them in from the card;
+    # until then the gate reports "no baseline" for this model rather than
+    # judging it against another model's number.
+    baselines:
+      mmmu_val: 62.2
+      mathvista_testmini: 70.5
     budget:
       # 448px tiles, 256 tokens/tile after pixel shuffle, +1 thumbnail tile.
       #
@@ -186,11 +216,7 @@ eval:
       repo: https://github.com/open-compass/VLMEvalKit
       repo_dir: /content/MMRM/src/VLMEvalKit
       work_dir: results/vlmevalkit
-      # The harness's OWN registered name for the model. For the gate we run
-      # the harness's own implementation, because that is what produced the
-      # published numbers; swapping in our adapter adds a variable and belongs
-      # in a separate comparison AFTER the gate passes.
-      model_id: Qwen2.5-VL-7B-Instruct
+      # Model names live in models.<name>.harness_ids, not here.
       # Command template. Placeholders: {python} {repo_dir} {work_dir}
       # {task_id} {task} {model_id} {model_path} {max_new_tokens} {judge}.
       # {judge} expands to "--judge MODEL" when eval.judge is set, else "". The
@@ -219,7 +245,6 @@ eval:
       repo: https://github.com/EvolvingLMMs-Lab/lmms-eval
       repo_dir: /content/MMRM/src/lmms-eval
       work_dir: results/lmms_eval
-      model_id: qwen2_5_vl
       # {limit} expands to "" when eval.limit is null, or "--limit N" when set
       # -- lmms_eval's own CLI genuinely supports --limit (unlike VLMEvalKit's,
       # see the note above), so this is the harness to use for a quick shakeout.
@@ -240,9 +265,7 @@ eval:
   #   measured safe token total into a per-image budget. Getting this wrong is a
   #   silent accuracy loss: a single-image benchmark given the 7-image budget
   #   sees every chart needlessly downscaled.
-  # baseline: published Qwen2.5-VL-7B-Instruct score, in percent.
-  #   *** VERIFY THESE against the official model card before trusting the gate.
-  #   A wrong baseline turns the gate into noise in either direction. ***
+  # Published scores are per model, so they live in models.<name>.baselines.
   tasks:
     - name: mmmu_val
       vlmevalkit: MMMU_DEV_VAL     # NOTE: spans dev+validation
@@ -255,13 +278,11 @@ eval:
       # VLMEvalKit's MMMU does use the judge, so it is NOT listed here.
       judge_free: [lmms_eval]
       max_images: 7
-      baseline: 58.6
 
     - name: mathvista_testmini
       vlmevalkit: MathVista_MINI
       lmms_eval: mathvista_testmini
       max_images: 1                # single-image: gets the whole token budget
-      baseline: 68.2
 
   limit: null                      # cap samples per task for a quick shakeout;
                                    # MUST be null for a gated run

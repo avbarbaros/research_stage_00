@@ -35,9 +35,8 @@ def base_data():
 # --- the shipped example must itself be valid ------------------------------
 def test_example_config_loads():
     cfg = load_config(EXAMPLE_CONFIG_PATH)
-    assert set(cfg.models) == {"qwen2_5_vl_7b", "internvl3_8b_hf", "internvl3_8b_native"}
+    assert set(cfg.models) == {"qwen2_5_vl_7b", "internvl3_8b_hf"}
     assert cfg.enabled_models.keys() == {"qwen2_5_vl_7b", "internvl3_8b_hf"}
-    assert cfg.model("internvl3_8b_native").enabled is False
 
 
 def test_example_config_decode_is_greedy():
@@ -266,4 +265,28 @@ def test_invalid_yaml_reports_clearly(tmp_path):
 def test_local_judge_is_rejected_until_implemented(tmp_path, base_data):
     base_data["eval"]["judge"].update(backend="local", model="Qwen/Qwen2.5-7B-Instruct")
     with pytest.raises(ConfigError, match="not implemented"):
+        load_config(write(tmp_path, base_data))
+
+
+def test_harness_wide_model_id_is_rejected(tmp_path, base_data):
+    base_data["eval"]["harnesses"]["lmms_eval"]["model_id"] = "qwen2_5_vl"
+    with pytest.raises(ConfigError, match="harness_ids"):
+        load_config(write(tmp_path, base_data))
+
+
+def test_harness_ids_reject_unknown_harness(tmp_path, base_data):
+    base_data["models"]["qwen2_5_vl_7b"]["harness_ids"]["nope"] = "x"
+    with pytest.raises(ConfigError, match="harness_ids"):
+        load_config(write(tmp_path, base_data))
+
+
+def test_task_level_baseline_is_rejected(tmp_path, base_data):
+    base_data["eval"]["tasks"][0]["baseline"] = 58.6
+    with pytest.raises(ConfigError, match="baselines"):
+        load_config(write(tmp_path, base_data))
+
+
+def test_baseline_must_be_numeric(tmp_path, base_data):
+    base_data["models"]["qwen2_5_vl_7b"]["baselines"]["mmmu_val"] = "58.6"
+    with pytest.raises(ConfigError, match="baselines.mmmu_val"):
         load_config(write(tmp_path, base_data))

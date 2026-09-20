@@ -221,7 +221,7 @@ def test_gate_skips_non_headline_metrics(cfg):
 
 
 def test_gate_reports_missing_baseline_rather_than_passing(cfg):
-    cfg.eval.tasks[1].baseline = None
+    cfg.model("qwen2_5_vl_7b").baselines["mathvista_testmini"] = None
     g = check_gate(cfg, [score()])[0]
     assert g.passed is None and g.delta is None
 
@@ -390,3 +390,40 @@ def test_diagnose_skips_the_judge_note_for_judge_free_failures(cfg):
     cfg.eval.judge.backend, cfg.eval.judge.model = "none", None
     notes = " ".join(diagnose(cfg, check_gate(cfg, [score(task="mmmu_val", harness="lmms_eval", value=40.0)])))
     assert "judge.backend is 'none'" not in notes
+
+
+# ---------------------------------------------------------------------------
+# Per-model harness names
+# ---------------------------------------------------------------------------
+def test_each_model_gets_its_own_harness_name(cfg):
+    task = cfg.eval.task("mmmu_val")
+    fields = lambda h, m: get_backend_class(h)(cfg).command_fields(m, task)["model_id"]
+    assert fields("lmms_eval", "qwen2_5_vl_7b") == "qwen2_5_vl"
+    assert fields("lmms_eval", "internvl3_8b_hf") == "internvl_hf"
+    assert fields("vlmevalkit", "internvl3_8b_hf") == "InternVL3-8B"
+
+
+def test_missing_harness_name_is_an_error_not_a_guess(cfg):
+    cfg.model("internvl3_8b_hf").harness_ids.pop("lmms_eval")
+    backend = get_backend_class("lmms_eval")(cfg)
+    with pytest.raises(ConfigError, match="harness_ids.lmms_eval"):
+        backend.command_fields("internvl3_8b_hf", cfg.eval.task("mmmu_val"))
+
+
+def test_baseline_is_looked_up_per_model(cfg):
+    # The same task must gate each model against its own published number.
+    cfg.model("internvl3_8b_hf").baselines["mmmu_val"] = 62.0
+    q = ScoreRecord(harness="lmms_eval", model="qwen2_5_vl_7b", task="mmmu_val",
+                    harness_task_id="x", metric="accuracy", score=58.0)
+    i = ScoreRecord(harness="lmms_eval", model="internvl3_8b_hf", task="mmmu_val",
+                    harness_task_id="x", metric="accuracy", score=58.0)
+    gq, gi = check_gate(cfg, [q, i])
+    assert gq.baseline == pytest.approx(58.6) and gq.passed is True
+    assert gi.baseline == pytest.approx(62.0) and gi.passed is False
+
+
+def test_model_without_a_baseline_is_not_gated_against_another_models(cfg):
+    i = ScoreRecord(harness="lmms_eval", model="internvl3_8b_hf", task="mmmu_val",
+                    harness_task_id="x", metric="accuracy", score=62.7)
+    g = check_gate(cfg, [i])[0]
+    assert g.baseline is None and g.passed is None

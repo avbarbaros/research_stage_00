@@ -55,7 +55,7 @@ python -m mmro.sweep --all-rungs --model internvl3_8b_hf \
 bash scripts/03_setup_harness.sh --archive   # clones + two isolated venvs, saved to Drive
 # then, before running:
 #   1. verify each eval.harnesses.<name>.command against that project's README
-#   2. verify the eval.tasks[].baseline values against the official model card
+#   2. verify the models.<name>.baselines values against the official model card
 #   3. set eval.judge.* — see the blockers below
 python -m mmro.eval --set eval.enabled=true --set eval.limit=25   # shakeout, minutes
 bash scripts/04_eval.sh             # the real run — hours
@@ -114,7 +114,7 @@ the harnesses and the most likely source of an MMMU delta — not a bug.
 ### Which model implementation runs
 
 For the gate, each harness runs **its own** registered Qwen2.5-VL class
-(`eval.harnesses.<name>.model_id`), because that is what produced the published
+(`models.<name>.harness_ids`), because that is what produced the published
 numbers. Substituting our adapter through the seam adds a variable and belongs in
 a separate comparison, *after* the gate passes.
 
@@ -123,8 +123,9 @@ a separate comparison, *after* the gate passes.
 Two things are config values I could not check from this machine, both marked in
 `config.example.yaml`:
 
-- **`eval.tasks[].baseline`** — the published scores the gate compares against. A
-  wrong baseline makes the gate noise in either direction.
+- **`models.<name>.baselines`** — the published scores the gate compares against,
+  per model. A wrong baseline makes the gate noise in either direction; an
+  unfilled (null) one makes the gate report "no baseline".
 - **`eval.harnesses[].command`** — both projects change their CLI between
   releases. It is a template string in config precisely so a change there means
   editing config, not patching code.

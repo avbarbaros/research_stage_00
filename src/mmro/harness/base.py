@@ -200,6 +200,17 @@ class HarnessBackend(ABC):
                 sys.stdout.write(line)
             return proc.wait()
 
+    def harness_model_id(self, model_name: str) -> str:
+        """The name this harness registers ``model_name`` under."""
+        model_id = self.cfg.model(model_name).harness_ids.get(self.name)
+        if not model_id:
+            raise ConfigError(
+                f"models.{model_name}.harness_ids.{self.name}: not set. Add the "
+                f"name {self.name} registers this model under (its own registry "
+                f"key, not a HF repo id) or disable the harness for this model."
+            )
+        return model_id
+
     def command_fields(self, model_name: str, task: TaskRow) -> dict:
         """Placeholders available to a harness's command template."""
         model_cfg = self.cfg.model(model_name)
@@ -210,7 +221,7 @@ class HarnessBackend(ABC):
             "work_dir": str(self.harness_cfg.work_path),
             "task_id": task.id_for(self.name),
             "task": task.name,
-            "model_id": self.harness_cfg.model_id or model_cfg.repo_id,
+            "model_id": self.harness_model_id(model_name),
             "model_path": str(self.model_paths.get(model_name, model_cfg.repo_id)),
             "max_new_tokens": decode.max_new_tokens,
             # A ready CLI chunk, not a bare value: "" when unset so a template

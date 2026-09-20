@@ -52,13 +52,17 @@ def check_gate(cfg: Config, scores: list[ScoreRecord]) -> list[GateResult]:
     out: list[GateResult] = []
     for record in scores:
         try:
-            row = cfg.eval.task(record.task)
+            cfg.eval.task(record.task)  # only tasks we configured are gated
         except ConfigError:
             continue
         # Only the headline metric is gated; sub-scores vary in definition
         # between harnesses and would produce noise, not signal.
         if record.metric not in ("accuracy", "exact_match"):
             continue
+        try:
+            baseline = cfg.model(record.model).baselines.get(record.task)
+        except ConfigError:
+            baseline = None  # score from a model no longer in the registry
         out.append(
             GateResult(
                 task=record.task,
@@ -66,7 +70,7 @@ def check_gate(cfg: Config, scores: list[ScoreRecord]) -> list[GateResult]:
                 model=record.model,
                 metric=record.metric,
                 score=record.score,
-                baseline=row.baseline,
+                baseline=baseline,
                 tolerance=cfg.eval.gate_tolerance,
             )
         )

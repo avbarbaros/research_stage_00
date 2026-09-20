@@ -18,7 +18,8 @@ paths:
   # drive: cache weights on Drive so they survive a Colab restart, and stage
   #        them to stage_dir before loading.
   # local: cache on local disk; re-downloads each session, no staging copy.
-  cache_mode: drive
+  #cache_mode: drive
+  cache_mode: local
 
   hf_home: /content/drive/MyDrive/MMRM/hf_cache   # used when cache_mode: drive
   local_hf_home: /content/MMRM/hf_cache           # used when cache_mode: local
@@ -106,17 +107,6 @@ models:
       # was correct at <= 14,336 tok and wrong from 14,848 up, while VRAM
       # allowed 30,720. Budget against the lower number.
       safe_total_visual_tokens: 14336
-
-  internvl3_8b_native:
-    # Fallback. Enable if the -hf path misbehaves on multi-image, or when you
-    # need exact parity with InternVL3's published benchmark numbers.
-    enabled: false
-    adapter: internvl3_native
-    repo_id: OpenGVLab/InternVL3-8B
-    trust_remote_code: true
-    budget:
-      max_tiles: 6
-      use_thumbnail: true
 
 # Constraints on the held-out set in paths.images_dir.
 images:
@@ -266,13 +256,14 @@ eval:
       judge_free: [lmms_eval]
       max_images: 7
       baseline: 58.6
+
     - name: mathvista_testmini
       vlmevalkit: MathVista_MINI
       lmms_eval: mathvista_testmini
       max_images: 1                # single-image: gets the whole token budget
       baseline: 68.2
 
-  limit: 25                      # cap samples per task for a quick shakeout;
+  limit: null                      # cap samples per task for a quick shakeout;
                                    # MUST be null for a gated run
 
   # MMMU and MathVista open-ended items need LLM answer extraction, and the

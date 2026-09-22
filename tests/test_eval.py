@@ -176,6 +176,37 @@ def test_lmms_eval_strips_the_filter_suffix(cfg, tmp_path):
     assert [r.metric for r in got] == ["exact_match"]
 
 
+def test_lmms_eval_falls_back_to_solution_subtask_for_headline_less_group(cfg, tmp_path):
+    # lmms-eval's real mathvista_testmini is a bare group over three prompting
+    # variants (cot/format/solution) with no group-level aggregate -- the group
+    # key itself carries no score, only bookkeeping. This is the actual JSON
+    # shape (see the lmms-eval mathvista_testmini.yaml group config), unlike
+    # the flat fixture above.
+    work = tmp_path / "l"
+    work.mkdir()
+    (work / "results.json").write_text(json.dumps({
+        "results": {
+            "mathvista_testmini": {"alias": "mathvista_testmini"},
+            "mathvista_testmini_cot": {"llm_as_judge_eval,none": 0.60, "alias": " - cot"},
+            "mathvista_testmini_format": {"llm_as_judge_eval,none": 0.60, "alias": " - format"},
+            "mathvista_testmini_solution": {"llm_as_judge_eval,none": 0.40, "alias": " - solution"},
+        },
+        "n-samples": {"mathvista_testmini_solution": {"original": 10, "effective": 10}},
+    }))
+    backend = get_backend_class("lmms_eval")(cfg)
+    got = backend.parse_results(
+        work, "qwen2_5_vl_7b", cfg.eval.task("mathvista_testmini"), "mathvista_testmini"
+    )
+    assert [(r.metric, r.score) for r in got] == [("llm_as_judge_eval", 40.0)]
+    assert got[0].harness_task_id == "mathvista_testmini_solution"
+    assert got[0].n_samples == 10
+    # And the gate recognizes lmms-eval's own metric name for this task as a
+    # headline score, not a sub-metric to be filtered out.
+    gate = check_gate(cfg, got)
+    assert len(gate) == 1
+    assert gate[0].baseline == pytest.approx(68.2)
+
+
 def test_parsed_scores_carry_decode_and_budget(cfg, tmp_path):
     # The whole point of the ScoreRecord fields: prove both harnesses ran under
     # identical conditions before comparing them.

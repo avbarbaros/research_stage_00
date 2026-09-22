@@ -27,6 +27,18 @@ from .base import HarnessBackend, budget_for_task
 # Keys that are bookkeeping rather than scores.
 NON_METRIC_KEYS = {"alias", "samples"}
 
+# lmms-eval's own ``mathvista_testmini`` task is a bare *group* -- three
+# prompting variants (``_cot``, ``_format``, ``_solution``) with no
+# ``aggregate_metric_list`` in the group's yaml. That means the group key
+# itself never carries a numeric score in the results JSON, only bookkeeping
+# (the subtask table lands under the three suffixed keys instead). Of those,
+# ``_solution`` is direct-answer prompting with no intermediate reasoning
+# step -- the protocol VLMEvalKit's ``MathVista_MINI`` and the published
+# numbers use -- so it is the one comparable to the configured baseline.
+# ``_cot`` and ``_format`` are separate prompting experiments, not the
+# headline metric. Add other headline-less groups here as they turn up.
+GROUP_HEADLINE_SUBTASK = {"mathvista_testmini": "mathvista_testmini_solution"}
+
 
 class LMMSEvalBackend(HarnessBackend):
     name = "lmms_eval"
@@ -82,7 +94,8 @@ class LMMSEvalBackend(HarnessBackend):
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
-            metrics = self.extract_metrics(payload, task_id)
+            effective_id = self.resolve_scored_task_id(payload, task_id)
+            metrics = self.extract_metrics(payload, effective_id)
             if not metrics:
                 continue
             return [
@@ -90,10 +103,10 @@ class LMMSEvalBackend(HarnessBackend):
                     harness=self.name,
                     model=model_name,
                     task=task.name,
-                    harness_task_id=task_id,
+                    harness_task_id=effective_id,
                     metric=metric,
                     score=score,
-                    n_samples=self.extract_n_samples(payload, task_id),
+                    n_samples=self.extract_n_samples(payload, effective_id),
                     decode=self.decode_echo(),
                     budget=budget_for_task(self.cfg, model_name, task),
                     raw_path=str(path),
@@ -101,6 +114,25 @@ class LMMSEvalBackend(HarnessBackend):
                 for metric, score in metrics.items()
             ]
         return []
+
+    @staticmethod
+    def resolve_scored_task_id(payload: dict, task_id: str) -> str:
+        """``task_id``, or the subtask that actually carries its score.
+
+        Most lmms-eval tasks put their metric directly under ``results[task_id]``.
+        A few (see :data:`GROUP_HEADLINE_SUBTASK`) are bare groups whose own key
+        never gets a number -- the real score lives one level down, under a
+        suffixed subtask key.
+        """
+        block = (payload.get("results") or {}).get(task_id)
+        has_direct_score = isinstance(block, dict) and any(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            and str(k).split(",")[0].strip() not in NON_METRIC_KEYS
+            for k, v in block.items()
+        )
+        if has_direct_score:
+            return task_id
+        return GROUP_HEADLINE_SUBTASK.get(task_id, task_id)
 
     @staticmethod
     def extract_metrics(payload: dict, task_id: str) -> dict[str, float]:

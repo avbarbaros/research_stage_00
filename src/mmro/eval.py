@@ -25,6 +25,14 @@ from .harness import get_backend_class
 from .harness.base import budget_for_task
 from .records import ScoreRecord, append_jsonl, iter_results
 
+# The headline metric name varies by harness and by how a task is scored:
+# VLMEvalKit always normalizes to "accuracy"; lmms-eval keeps whatever name
+# the task's own yaml gives its metric -- "exact_match" for rule-based tasks
+# like mmmu_val, "llm_as_judge_eval" for LLM-judged ones like MathVista's
+# solution-prompting variant. All three are headline scores comparable to a
+# published baseline; anything else is a sub-metric and stays out of the gate.
+HEADLINE_METRICS = ("accuracy", "exact_match", "llm_as_judge_eval")
+
 
 @dataclass
 class GateResult:
@@ -57,7 +65,7 @@ def check_gate(cfg: Config, scores: list[ScoreRecord]) -> list[GateResult]:
             continue
         # Only the headline metric is gated; sub-scores vary in definition
         # between harnesses and would produce noise, not signal.
-        if record.metric not in ("accuracy", "exact_match"):
+        if record.metric not in HEADLINE_METRICS:
             continue
         try:
             baseline = cfg.model(record.model).baselines.get(record.task)

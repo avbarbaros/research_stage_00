@@ -281,7 +281,15 @@ eval:
 
     - name: mathvista_testmini
       vlmevalkit: MathVista_MINI
-      lmms_eval: mathvista_testmini
+      # lmms-eval's own "mathvista_testmini" is a bare group over three
+      # independent prompting variants (_cot, _format, _solution) -- running
+      # it invokes all three for 3x the inference/judge cost, and the group
+      # key itself carries no aggregate score (see lmms_eval.py's
+      # GROUP_HEADLINE_SUBTASK). "_solution" is direct-answer, zero-shot
+      # prompting with no reasoning scaffold -- the protocol VLMEvalKit's
+      # MathVista_MINI and the published baseline below both use -- so it is
+      # the one comparable number, run on its own.
+      lmms_eval: mathvista_testmini_solution
       max_images: 1                # single-image: gets the whole token budget
 
   limit: null                      # cap samples per task for a quick shakeout;

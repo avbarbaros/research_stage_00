@@ -157,7 +157,7 @@ def test_lora_targets_declared_for_every_adapter(cfg):
 def test_canonical_task_resolves_to_both_harness_ids(cfg):
     # The headline criterion: one config row, two harness-specific IDs.
     assert resolve_task_id(cfg, "mathvista_testmini", "vlmevalkit") == "MathVista_MINI"
-    assert resolve_task_id(cfg, "mathvista_testmini", "lmms_eval") == "mathvista_testmini"
+    assert resolve_task_id(cfg, "mathvista_testmini", "lmms_eval") == "mathvista_testmini_solution"
     assert resolve_task_id(cfg, "mmmu_val", "vlmevalkit") == "MMMU_DEV_VAL"
     assert resolve_task_id(cfg, "mmmu_val", "lmms_eval") == "mmmu_val"
 

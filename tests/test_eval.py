@@ -103,7 +103,7 @@ def test_each_harness_gets_its_own_task_id(cfg):
     a = get_backend_class("vlmevalkit")(cfg).command_fields("qwen2_5_vl_7b", task)
     b = get_backend_class("lmms_eval")(cfg).command_fields("qwen2_5_vl_7b", task)
     assert a["task_id"] == "MathVista_MINI"
-    assert b["task_id"] == "mathvista_testmini"
+    assert b["task_id"] == "mathvista_testmini_solution"
 
 
 def test_unknown_placeholder_is_a_config_error(cfg):

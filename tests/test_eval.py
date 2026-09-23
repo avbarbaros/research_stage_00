@@ -229,6 +229,26 @@ def test_vlmevalkit_parses_current_mainline_score_csv(cfg, tmp_path):
     assert [(r.metric, r.score) for r in got] == [("accuracy", pytest.approx(68.3))]
 
 
+def test_vlmevalkit_pins_mmmu_to_the_validation_split(cfg, tmp_path):
+    # MMMU_DEV_VAL is dev (150) + validation (900) in one TSV, and VLMEvalKit's
+    # own report_acc() (vlmeval/dataset/utils/multiple_choice.py) scores them
+    # as separate ROWS, not combined -- "Overall" is a column here, not a row
+    # value, so the generic "Overall"-row fallback above does not apply. Row
+    # order comes from `list(set(df['split']))`, which is NOT stable across
+    # Python processes, so the fixture deliberately puts "dev" first to prove
+    # the parser picks the *validation* row by name, not by position.
+    work = tmp_path / "v"
+    work.mkdir()
+    (work / "m_MMMU_DEV_VAL_acc.csv").write_text(
+        "split,Overall\ndev,80.0\nvalidation,58.6\n"
+    )
+    backend = get_backend_class("vlmevalkit")(cfg)
+    got = backend.parse_results(
+        work, "qwen2_5_vl_7b", cfg.eval.task("mmmu_val"), "MMMU_DEV_VAL"
+    )
+    assert [(r.metric, r.score) for r in got] == [("accuracy", pytest.approx(58.6))]
+
+
 def test_parsed_scores_carry_decode_and_budget(cfg, tmp_path):
     # The whole point of the ScoreRecord fields: prove both harnesses ran under
     # identical conditions before comparing them.

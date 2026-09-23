@@ -47,6 +47,21 @@ ACCURACY_COLUMNS = ("Overall", "overall", "Average", "acc", "Accuracy")
 # releases) and "_score.csv" (current main -- see module docstring).
 SCORE_FILE_MARKERS = ("acc", "score")
 
+# VLMEvalKit registers no validation-only MMMU dataset -- MMMU_DEV_VAL is the
+# only non-test option, and it is dev (150) + validation (900) rows in ONE
+# TSV (see the "split" column in the hosted MMMU_DEV_VAL.tsv). Its own MCQ
+# scorer, report_acc() in vlmeval/dataset/utils/multiple_choice.py, does NOT
+# average the two together: it emits one row PER split value, "Overall" a
+# column on each row, e.g. a `dev` row and a `validation` row side by side.
+# That row order comes from `list(set(df['split']))` -- a Python set, whose
+# iteration order is not guaranteed stable across processes (str hash
+# randomization) -- so picking rows[0] would silently read whichever split
+# happened to land first, some runs dev and others validation. The published
+# baselines here (mmmu_val: 58.6 / 62.2) are validation-only, matching
+# lmms-eval's mmmu_val and the models' own papers, so pin that split
+# explicitly per VLMEvalKit dataset id rather than trusting row order.
+TASK_HEADLINE_SPLIT = {"MMMU_DEV_VAL": "validation"}
+
 
 class VLMEvalKitBackend(HarnessBackend):
     name = "vlmevalkit"
@@ -130,7 +145,7 @@ class VLMEvalKitBackend(HarnessBackend):
     ) -> list[ScoreRecord]:
         records: list[ScoreRecord] = []
         for path in self.find_score_files(work, task_id)[:1]:
-            for metric, score in self._read_csv(path).items():
+            for metric, score in self._read_csv(path, task_id).items():
                 records.append(
                     ScoreRecord(
                         harness=self.name,
@@ -147,25 +162,37 @@ class VLMEvalKitBackend(HarnessBackend):
         return records
 
     @staticmethod
-    def _read_csv(path: Path) -> dict[str, float]:
+    def _read_csv(path: Path, task_id: str) -> dict[str, float]:
         """Pull the headline accuracy out of a VLMEvalKit score CSV.
 
-        Two incompatible shapes, per the module docstring: older releases put
-        the headline score in a column literally named ``Overall`` on a single
-        row; current main writes one row per category and puts ``Overall`` as
-        a row VALUE instead, with the score in ``acc`` on that row. We prefer
-        a row explicitly marked ``Overall`` over just taking ``rows[0]``, so a
-        category-ordering change upstream can't silently pick the wrong row.
-        Failing both, we fall back to the first numeric column of the first
-        row, so a renamed header degrades to a wrong-but-visible metric name
-        rather than a crash -- the report shows the metric, so a surprise is
-        legible.
+        Three incompatible shapes/pitfalls, per the module docstring:
+        - older releases put the headline score in a column literally named
+          ``Overall`` on a single row;
+        - current main writes one row per CATEGORY (MathVista) and puts
+          ``Overall`` as a row VALUE instead, with the score in ``acc`` on
+          that row -- we prefer a row explicitly marked ``Overall`` over just
+          taking ``rows[0]``, so a category-ordering change can't silently
+          pick the wrong row;
+        - some datasets (MMMU_DEV_VAL) instead write one row per SPLIT, each
+          with its own ``Overall`` column and no row literally saying
+          "Overall" -- :data:`TASK_HEADLINE_SPLIT` pins which split's row is
+          the headline number, checked before either of the above.
+        Failing all three, we fall back to the first numeric column of the
+        first row, so a renamed header degrades to a wrong-but-visible metric
+        name rather than a crash -- the report shows the metric, so a
+        surprise is legible.
         """
         with path.open(newline="", encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
         if not rows:
             return {}
-        row = next((r for r in rows if "Overall" in r.values()), rows[0])
+
+        row = None
+        wanted_split = TASK_HEADLINE_SPLIT.get(task_id)
+        if wanted_split is not None:
+            row = next((r for r in rows if r.get("split") == wanted_split), None)
+        if row is None:
+            row = next((r for r in rows if "Overall" in r.values()), rows[0])
 
         def as_pct(raw: str) -> float | None:
             try:

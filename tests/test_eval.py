@@ -207,6 +207,28 @@ def test_lmms_eval_falls_back_to_solution_subtask_for_headline_less_group(cfg, t
     assert gate[0].baseline == pytest.approx(68.2)
 
 
+def test_vlmevalkit_parses_current_mainline_score_csv(cfg, tmp_path):
+    # Current VLMEvalKit main writes `{model}_{dataset}_{judge}_score.csv`
+    # (get_intermediate_file_path(..., '_score', 'csv') in
+    # MathVista.evaluate_heuristic), one row PER CATEGORY, with "Overall" as a
+    # row value under "Task&Skill" rather than a column -- unlike the older
+    # `_acc.csv` shape covered above. This is the actual shape VLMEvalKit wrote
+    # for a real run; see the Task&Skill/tot/prefetch/hit/prefetch_rate/acc
+    # columns in vlmeval/dataset/utils/mathvista.py:MathVista_acc.
+    work = tmp_path / "v"
+    work.mkdir()
+    (work / "Qwen2.5-VL-7B-Instruct_MathVista_MINI_gpt-4o-mini_score.csv").write_text(
+        "Task&Skill,tot,prefetch,hit,prefetch_rate,acc\n"
+        "Overall,1000,393,683,39.3,68.3\n"
+        "scientific reasoning,122,74,84,60.6557,68.8525\n"
+    )
+    backend = get_backend_class("vlmevalkit")(cfg)
+    got = backend.parse_results(
+        work, "qwen2_5_vl_7b", cfg.eval.task("mathvista_testmini"), "MathVista_MINI"
+    )
+    assert [(r.metric, r.score) for r in got] == [("accuracy", pytest.approx(68.3))]
+
+
 def test_parsed_scores_carry_decode_and_budget(cfg, tmp_path):
     # The whole point of the ScoreRecord fields: prove both harnesses ran under
     # identical conditions before comparing them.

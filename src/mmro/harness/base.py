@@ -170,6 +170,20 @@ class HarnessBackend(ABC):
         # Harnesses expect the conventional name whatever ours is called.
         return {"OPENAI_API_KEY": key} if key else {}
 
+    def venv_env(self) -> dict[str, str]:
+        """What activating the harness venv would set.
+
+        We run the venv's python directly, which does not put its bin/ on PATH.
+        Anything the harness execs by name then misses the venv's copy -- e.g.
+        FlashInfer (under vLLM) JIT-builds kernels by running `ninja`, which
+        lives in the venv's bin/, and dies with FileNotFoundError without it.
+        """
+        venv = self.harness_cfg.venv_path
+        return {
+            "VIRTUAL_ENV": str(venv),
+            "PATH": os.pathsep.join([str(venv / "bin"), os.environ.get("PATH", "")]),
+        }
+
     def decode_echo(self) -> dict:
         """Decoding settings recorded on every score.
 
@@ -193,7 +207,7 @@ class HarnessBackend(ABC):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                env={**os.environ, **self.judge_env()},
+                env={**os.environ, **self.venv_env(), **self.judge_env()},
             )
             assert proc.stdout is not None
             for line in proc.stdout:

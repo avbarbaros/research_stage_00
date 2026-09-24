@@ -19,3 +19,4 @@ rouge-score        # imported by dataset/utils/mmlongbench_metrics.py
 # isolated, but it is why vllm stays out of the base environment.
 vllm>=0.8
 qwen-vl-utils      # process_vision_info, imported by generate_inner_vllm
+ninja              # FlashInfer JIT-builds vLLM's sampler with it at engine start

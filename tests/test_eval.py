@@ -429,6 +429,17 @@ def test_key_never_appears_in_argv_but_reaches_the_environment(cfg, monkeypatch)
     assert get_backend_class("lmms_eval")(cfg).judge_env()["MODEL_VERSION"] == "gpt-4o-mini"
 
 
+def test_harness_subprocess_sees_its_venv_bin_first(cfg, monkeypatch):
+    # FlashInfer execs `ninja` by name; it lives in the venv's bin/, which is
+    # not on PATH when we call the venv's python directly.
+    monkeypatch.setenv("PATH", "/usr/bin")
+    for name in ("vlmevalkit", "lmms_eval"):
+        backend = get_backend_class(name)(cfg)
+        env = backend.venv_env()
+        venv_bin = str(cfg.eval.harnesses[name].venv_path / "bin")
+        assert env["PATH"].split(":") == [venv_bin, "/usr/bin"]
+
+
 def test_vlmevalkit_reads_its_key_from_dot_env(cfg, monkeypatch, tmp_path):
     cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

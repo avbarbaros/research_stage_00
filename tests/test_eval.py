@@ -106,6 +106,27 @@ def test_each_harness_gets_its_own_task_id(cfg):
     assert b["task_id"] == "mathvista_testmini_solution"
 
 
+def test_vlmevalkit_model_kwargs_reach_the_launcher_as_one_json_token(cfg):
+    argv = cfg.eval.harnesses["vlmevalkit"].render_command(
+        **get_backend_class("vlmevalkit")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+        )
+    )
+    assert argv[1].endswith("vlmevalkit_launch.py")
+    assert json.loads(argv[argv.index("--model-kwargs") + 1]) == {"use_vllm": True}
+    # Never run.py's own flag: it leaks use_vllm into the judge's request body.
+    assert "--use-vllm" not in argv
+
+
+def test_model_without_harness_kwargs_gets_an_empty_mapping(cfg):
+    argv = cfg.eval.harnesses["vlmevalkit"].render_command(
+        **get_backend_class("vlmevalkit")(cfg).command_fields(
+            "internvl3_8b_hf", cfg.eval.task("mmmu_val")
+        )
+    )
+    assert json.loads(argv[argv.index("--model-kwargs") + 1]) == {}
+
+
 def test_unknown_placeholder_is_a_config_error(cfg):
     cfg.eval.harnesses["vlmevalkit"].command = "{python} --nope {not_a_field}"
     with pytest.raises(ConfigError, match="unknown placeholder"):

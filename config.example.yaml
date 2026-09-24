@@ -63,6 +63,15 @@ models:
     harness_ids:
       vlmevalkit: Qwen2.5-VL-7B-Instruct
       lmms_eval: qwen2_5_vl
+    # Extra kwargs for the harness's own model class, on top of its registered
+    # defaults (which are otherwise kept as-is: VLMEvalKit's Qwen entry runs at
+    # 1280-16384 visual tokens/image and max_new_tokens 2048).
+    # use_vllm: VLMEvalKit's Qwen2VLChat generates with vLLM instead of HF
+    # transformers -- same greedy decoding, much faster. Its engine is fixed
+    # upstream at max_model_len 32768, gpu_memory_utilization 0.9.
+    harness_model_kwargs:
+      vlmevalkit:
+        use_vllm: true
     # Published scores in percent, which the stage-0.2 gate compares against.
     #   *** VERIFY THESE against the official model card before trusting the gate.
     #   A wrong baseline turns the gate into noise in either direction. ***
@@ -232,11 +241,18 @@ eval:
       # eval.limit has ZERO effect here and the full split always runs. lmms_eval
       # (below) genuinely supports --limit, so use that harness for a quick
       # shakeout, or pre-subset VLMEvalKit's cached TSV yourself.
-      command: "{python} {repo_dir}/run.py --data {task_id} --model {model_id} --work-dir {work_dir} {judge}"
+      #
+      # {launcher} wraps run.py so models.<name>.harness_model_kwargs.vlmevalkit
+      # ({model_kwargs}, JSON) reaches the harness's model class via a
+      # generated --config file ({config_out}). With no kwargs it runs the plain
+      # `run.py --model --data` form. Do NOT use run.py's own --use-vllm: it
+      # also leaks use_vllm into the OpenAI judge's request body.
+      command: "{python} {launcher} {repo_dir}/run.py --model {model_id} --data {task_id} --model-kwargs {model_kwargs} --config-out {config_out} --work-dir {work_dir} {judge}"
       # VLMEvalKit imports its whole dataset registry on `import vlmeval`, so a
       # single missing optional dep stops run.py before it reaches your task.
       # The setup script runs this and resolves what is missing in one pass.
-      import_probe: "import vlmeval"
+      # vllm + qwen_vl_utils: the use_vllm path for Qwen2.5-VL (see models).
+      import_probe: "import vlmeval; import vllm; import qwen_vl_utils"
       python_bin: ""               # e.g. python3.11 if a dep lacks a wheel
 
     lmms_eval:

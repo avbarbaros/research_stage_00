@@ -22,7 +22,9 @@ Explaining a delta is stage-0.2 research output; hiding it would be a bug.
 from __future__ import annotations
 
 import importlib
+import json
 import os
+import shlex
 import subprocess
 import sys
 from abc import ABC, abstractmethod
@@ -224,6 +226,11 @@ class HarnessBackend(ABC):
             "model_id": self.harness_model_id(model_name),
             "model_path": str(self.model_paths.get(model_name, model_cfg.repo_id)),
             "max_new_tokens": decode.max_new_tokens,
+            # models.<name>.harness_model_kwargs.<harness> as one shell-quoted
+            # JSON token ('{}' when unset), so the template can pass it whole.
+            "model_kwargs": shlex.quote(
+                json.dumps(model_cfg.harness_model_kwargs.get(self.name, {}))
+            ),
             # A ready CLI chunk, not a bare value: "" when unset so a template
             # that appends {limit} bare (no --limit prefix of its own) gets
             # nothing, and shlex.split drops the empty token cleanly. A bare

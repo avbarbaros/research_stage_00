@@ -174,6 +174,12 @@ class ModelConfig:
     # means "no published number", and the gate says so instead of guessing.
     baselines: dict[str, float | None] = field(default_factory=dict)
 
+    # Extra constructor kwargs for the harness's OWN model class, per harness,
+    # e.g. {vlmevalkit: {use_vllm: true}}. Layered on top of the harness's
+    # registered defaults, never replacing them. Per model because the classes
+    # differ: VLMEvalKit's Qwen2VLChat takes use_vllm, its InternVLChat does not.
+    harness_model_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
     # Populated by the loader; not a YAML key.
     name: str = ""
 
@@ -186,6 +192,19 @@ class ModelConfig:
                 raise ConfigError(
                     f"models.{self.name}.harness_ids.{harness}: expected a "
                     f"non-empty string, got {model_id!r}"
+                )
+        if not isinstance(self.harness_model_kwargs, dict):
+            raise ConfigError(
+                f"models.{self.name}.harness_model_kwargs: expected a mapping"
+            )
+        for harness, kwargs in self.harness_model_kwargs.items():
+            _check_enum(
+                f"models.{self.name}.harness_model_kwargs", harness, KNOWN_HARNESSES
+            )
+            if not isinstance(kwargs, dict):
+                raise ConfigError(
+                    f"models.{self.name}.harness_model_kwargs.{harness}: expected "
+                    f"a mapping of constructor kwargs, got {kwargs!r}"
                 )
         if not isinstance(self.baselines, dict):
             raise ConfigError(f"models.{self.name}.baselines: expected a mapping")

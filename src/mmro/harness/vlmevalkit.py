@@ -28,6 +28,11 @@ because both have moved across versions:
 
 Verified against VLMEvalKit's main branch as of 2026-09; re-check if the gate
 fails on this again -- it will, the next time the CLI moves.
+
+**Model kwargs** (``models.<name>.harness_model_kwargs.vlmevalkit``, e.g.
+``use_vllm: true``) go through ``vlmevalkit_launch.py``, which writes a
+``run.py --config`` JSON. The config's work_dir gets a ``configs/`` folder of
+those JSONs; a ``*.json`` there never matches the ``*.csv`` score search.
 """
 
 from __future__ import annotations
@@ -100,6 +105,16 @@ class VLMEvalKitBackend(HarnessBackend):
                 f"directory and widen ACCURACY_COLUMNS or the glob if so."
             )
         return records
+
+    def command_fields(self, model_name: str, task: TaskRow) -> dict:
+        fields = super().command_fields(model_name, task)
+        # {launcher} turns {model_kwargs} into a run.py --config JSON; see
+        # vlmevalkit_launch.py for why run.py's own --use-vllm is not used.
+        fields["launcher"] = str(Path(__file__).with_name("vlmevalkit_launch.py"))
+        fields["config_out"] = str(
+            self.harness_cfg.work_path / "configs" / f"{model_name}_{task.name}.json"
+        )
+        return fields
 
     def judge_key_present(self) -> bool:
         # VLMEvalKit also loads its key from a .env file in its own repo.

@@ -14,3 +14,8 @@
 # file once you have confirmed them.
 
 rouge-score        # imported by dataset/utils/mmlongbench_metrics.py
+# use_vllm path in vlm/qwen2_vl/model.py (models.*.harness_model_kwargs).
+# vllm pins its own torch and replaces the venv's -- fine here, this venv is
+# isolated, but it is why vllm stays out of the base environment.
+vllm>=0.8
+qwen-vl-utils      # process_vision_info, imported by generate_inner_vllm

@@ -86,6 +86,22 @@ def test_unknown_harness_rejected(tmp_path, base_data):
         load_config(write(tmp_path, base_data))
 
 
+def test_harness_model_kwargs_rejects_unknown_harness(tmp_path, base_data):
+    base_data["models"]["qwen2_5_vl_7b"]["harness_model_kwargs"] = {
+        "vlmevalkitt": {"use_vllm": True}
+    }
+    with pytest.raises(ConfigError, match="harness_model_kwargs"):
+        load_config(write(tmp_path, base_data))
+
+
+def test_harness_model_kwargs_must_be_a_mapping(tmp_path, base_data):
+    base_data["models"]["qwen2_5_vl_7b"]["harness_model_kwargs"] = {
+        "vlmevalkit": "use_vllm"
+    }
+    with pytest.raises(ConfigError, match="expected a mapping of constructor kwargs"):
+        load_config(write(tmp_path, base_data))
+
+
 # --- enum and type validation ----------------------------------------------
 @pytest.mark.parametrize(
     "section,key,value,match",

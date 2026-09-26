@@ -162,6 +162,45 @@ def test_max_new_tokens_cap_is_validated(value):
         TaskRow(name="t", lmms_eval="t", max_new_tokens=value)
 
 
+def test_mmmu_reasoning_is_capped_on_lmms_eval(cfg):
+    argv = cfg.eval.harnesses["lmms_eval"].render_command(
+        **get_backend_class("lmms_eval")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+        )
+    )
+    assert argv[argv.index("--gen_kwargs") + 1] == "max_new_tokens=4096"
+
+
+def test_uncapped_task_keeps_the_harness_default(cfg):
+    argv = cfg.eval.harnesses["lmms_eval"].render_command(
+        **get_backend_class("lmms_eval")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mathvista_testmini")
+        )
+    )
+    assert "--gen_kwargs" not in argv
+
+
+def test_cap_without_a_placeholder_is_a_config_error(cfg):
+    # VLMEvalKit's template has no {gen_kwargs}: a cap there would be ignored.
+    cfg.eval.task("mmmu_val").max_new_tokens["vlmevalkit"] = 4096
+    with pytest.raises(ConfigError, match="no \\{gen_kwargs\\} placeholder"):
+        get_backend_class("vlmevalkit")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+        )
+
+
+@pytest.mark.parametrize("value, match", [
+    ({"lmms_evl": 4096}, "max_new_tokens"),
+    ({"lmms_eval": 0}, "expected >= 1"),
+    (4096, "expected a mapping"),
+])
+def test_max_new_tokens_is_validated(value, match):
+    from mmro.config import TaskRow
+
+    with pytest.raises(ConfigError, match=match):
+        TaskRow(name="t", lmms_eval="t", max_new_tokens=value)
+
+
 def test_unknown_placeholder_is_a_config_error(cfg):
     cfg.eval.harnesses["vlmevalkit"].command = "{python} --nope {not_a_field}"
     with pytest.raises(ConfigError, match="unknown placeholder"):

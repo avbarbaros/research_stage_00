@@ -12,3 +12,11 @@
 # eval.harnesses.lmms_eval.python_bin (e.g. python3.11) and rebuild the venv.
 
 eva-decord         # provides `decord`; use plain `decord` if your Python is <=3.11
+
+# math_verify's own dependency, which pip leaves out: lmms-eval also requires
+# latex2sympy2, pinned to antlr4==4.7.2, while latex2sympy2_extended needs
+# antlr4 4.9.3-4.13.2 -- no antlr satisfies both. This picks math_verify's side;
+# it breaks the old latex2sympy2, which only mathvision/stare/emma import (not
+# MMMU or MathVista). Needed by *_reasoning tasks via
+# tasks/_task_utils/reasoning_utils.py.
+latex2sympy2_extended[antlr4_13_2]==1.11.0

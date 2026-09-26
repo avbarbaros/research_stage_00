@@ -264,10 +264,16 @@ eval:
       # {limit} expands to "" when eval.limit is null, or "--limit N" when set
       # -- lmms_eval's own CLI genuinely supports --limit (unlike VLMEvalKit's,
       # see the note above), so this is the harness to use for a quick shakeout.
-      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --write_out --output_path {work_dir} {limit}"
+      # {gen_kwargs} expands to "--gen_kwargs max_new_tokens=N" when the task
+      # sets eval.tasks[].max_new_tokens.lmms_eval, else "". lmms-eval merges
+      # it into the task's own generation_kwargs (only max_new_tokens changes)
+      # and records it under "config" in its results JSON.
+      command: "{python} -m lmms_eval --model {model_id} --model_args pretrained={model_path} --tasks {task_id} --batch_size 1 --log_samples --write_out --output_path {work_dir} {limit} {gen_kwargs}"
       # Importing the model module is what fails (it pulls decord even for
       # image-only tasks), so probe that rather than just the package.
-      import_probe: "import lmms_eval; import lmms_eval.models.simple.qwen2_5_vl"
+      # math_verify: imported by the *_reasoning tasks' scorer at task load,
+      # AFTER the model is loaded -- probe it here so setup catches it instead.
+      import_probe: "import lmms_eval; import lmms_eval.models.simple.qwen2_5_vl; from math_verify import parse, verify"
       # decord has no wheel for Python 3.12+. If eva-decord also fails to
       # install, set this to python3.11 and rebuild with --rebuild.
       python_bin: ""
@@ -285,14 +291,30 @@ eval:
   tasks:
     - name: mmmu_val
       vlmevalkit: MMMU_DEV_VAL     # NOTE: spans dev+validation
-      lmms_eval: mmmu_val          # NOTE: validation only -- a real split
-                                   # difference, and a likely source of delta
-      # lmms-eval scores mmmu_val with rule-based parsing (no LLM judge), so
-      # that run needs no judge/key. Verified against upstream lmms-eval main;
-      # re-check in your checkout with:
-      #   grep -n "OpenAI\|API_TYPE\|get_server" <repo_dir>/lmms_eval/tasks/mmmu/utils.py
-      # VLMEvalKit's MMMU does use the judge, so it is NOT listed here.
-      judge_free: [lmms_eval]
+      # NOTE: validation only -- a real split difference, and a likely source
+      # of delta.
+      #
+      # mmmu_val_reasoning, not plain mmmu_val: a system prompt asks for
+      # <think>...</think><answer>...</answer>, headline metric acc_score.
+      # Scoring is rule-based (answer tag -> relaxed exact match ->
+      # math_verify); items that score 0 are re-checked by the LLM judge,
+      # which the backend enables (USE_LLM_JUDGE=True, JUDGE_MODEL_NAME =
+      # eval.judge.model) -- so this row is NOT judge_free for lmms_eval.
+      # Plain mmmu_val is rule-based only and was judge_free: [lmms_eval].
+      #
+      # Protocol differences to keep in mind when reading the gate:
+      #   * the baseline below was published with direct-answer prompting, not
+      #     this think/answer format;
+      #   * the task's own max_new_tokens is 49152 -- a runaway repetition
+      #     loop runs that long on HF generate. Capped below at 4096, well
+      #     above a normal reasoning answer: a DEVIATION from the task default,
+      #     so state it in the write-up.
+      # Verified against lmms-eval 42296f8; re-check with:
+      #   grep -n "getenv" <repo_dir>/lmms_eval/tasks/_task_utils/reasoning_utils.py
+      lmms_eval: mmmu_val_reasoning
+      max_new_tokens:
+        lmms_eval: 4096
+        #lmms_eval: 49152 # Default for the task, but we cap it to avoid runaway loops
       max_images: 7
 
     - name: mathvista_testmini

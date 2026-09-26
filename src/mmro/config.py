@@ -382,8 +382,22 @@ class TaskRow:
     # score tens of points low), so this must be opted into per harness.
     judge_free: list[str] = field(default_factory=list)
 
+    # Per-harness cap on generated tokens, overriding the harness task's own
+    # default (harness -> tokens). Unset means the harness default stands. A
+    # cap is a protocol deviation from the published setup, so it is opt-in
+    # per task and harness, and rendered via the {gen_kwargs} placeholder.
+    max_new_tokens: dict[str, int] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         _check_int(f"eval.tasks[{self.name}].max_images", self.max_images, minimum=1)
+        if not isinstance(self.max_new_tokens, dict):
+            raise ConfigError(
+                f"eval.tasks[{self.name}].max_new_tokens: expected a mapping of "
+                f"harness -> tokens, got {self.max_new_tokens!r}"
+            )
+        for harness, tokens in self.max_new_tokens.items():
+            _check_enum(f"eval.tasks[{self.name}].max_new_tokens", harness, KNOWN_HARNESSES)
+            _check_int(f"eval.tasks[{self.name}].max_new_tokens.{harness}", tokens, minimum=1)
         if not isinstance(self.judge_free, list):
             raise ConfigError(
                 f"eval.tasks[{self.name}].judge_free: expected a list of harness "

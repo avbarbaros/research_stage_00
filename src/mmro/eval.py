@@ -31,7 +31,9 @@ from .records import ScoreRecord, append_jsonl, iter_results
 # like mmmu_val, "llm_as_judge_eval" for LLM-judged ones like MathVista's
 # solution-prompting variant. All three are headline scores comparable to a
 # published baseline; anything else is a sub-metric and stays out of the gate.
-HEADLINE_METRICS = ("accuracy", "exact_match", "llm_as_judge_eval")
+# acc_score: lmms-eval's *_reasoning tasks (their other metric, format_score,
+# only checks the <think>/<answer> tags and is not an accuracy).
+HEADLINE_METRICS = ("accuracy", "exact_match", "llm_as_judge_eval", "acc_score")
 
 
 @dataclass

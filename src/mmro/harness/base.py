@@ -260,7 +260,25 @@ class HarnessBackend(ABC):
             "limit": (
                 "" if self.cfg.eval.limit is None else f"--limit {self.cfg.eval.limit}"
             ),
+            "gen_kwargs": self.gen_kwargs_arg(task),
         }
+
+    def gen_kwargs_arg(self, task: TaskRow) -> str:
+        """``--gen_kwargs max_new_tokens=N`` for a capped task, else "".
+
+        A cap the template has nowhere to put would silently leave the task
+        at its (possibly 49k-token) default, so that is a config error.
+        """
+        cap = task.max_new_tokens.get(self.name)
+        if cap is None:
+            return ""
+        if "{gen_kwargs}" not in self.harness_cfg.command:
+            raise ConfigError(
+                f"eval.tasks[{task.name}].max_new_tokens.{self.name} is set, but "
+                f"eval.harnesses.{self.name}.command has no {{gen_kwargs}} "
+                f"placeholder, so the cap would be ignored"
+            )
+        return f"--gen_kwargs max_new_tokens={cap}"
 
 
 def get_backend_class(harness: str) -> type[HarnessBackend]:

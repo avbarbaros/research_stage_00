@@ -159,7 +159,7 @@ def test_canonical_task_resolves_to_both_harness_ids(cfg):
     assert resolve_task_id(cfg, "mathvista_testmini", "vlmevalkit") == "MathVista_MINI"
     assert resolve_task_id(cfg, "mathvista_testmini", "lmms_eval") == "mathvista_testmini_solution"
     assert resolve_task_id(cfg, "mmmu_val", "vlmevalkit") == "MMMU_DEV_VAL"
-    assert resolve_task_id(cfg, "mmmu_val", "lmms_eval") == "mmmu_val"
+    assert resolve_task_id(cfg, "mmmu_val", "lmms_eval") == "mmmu_val_reasoning"
 
 
 def test_every_configured_task_resolves_for_every_enabled_harness(cfg):

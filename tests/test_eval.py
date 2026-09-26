@@ -127,6 +127,41 @@ def test_model_without_harness_kwargs_gets_an_empty_mapping(cfg):
     assert json.loads(argv[argv.index("--model-kwargs") + 1]) == {}
 
 
+def test_capped_task_passes_gen_kwargs_to_lmms_eval(cfg):
+    argv = cfg.eval.harnesses["lmms_eval"].render_command(
+        **get_backend_class("lmms_eval")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+        )
+    )
+    assert argv[argv.index("--gen_kwargs") + 1] == "max_new_tokens=4096"
+
+
+def test_uncapped_task_keeps_the_harness_default(cfg):
+    argv = cfg.eval.harnesses["lmms_eval"].render_command(
+        **get_backend_class("lmms_eval")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mathvista_testmini")
+        )
+    )
+    assert "--gen_kwargs" not in argv
+
+
+def test_cap_without_a_placeholder_is_a_config_error(cfg):
+    # VLMEvalKit's template has no {gen_kwargs}: a cap there would be ignored.
+    cfg.eval.task("mmmu_val").max_new_tokens["vlmevalkit"] = 4096
+    with pytest.raises(ConfigError, match="no \\{gen_kwargs\\} placeholder"):
+        get_backend_class("vlmevalkit")(cfg).command_fields(
+            "qwen2_5_vl_7b", cfg.eval.task("mmmu_val")
+        )
+
+
+@pytest.mark.parametrize("value", [{"lmms_evl": 4096}, {"lmms_eval": 0}, {"lmms_eval": "4096"}])
+def test_max_new_tokens_cap_is_validated(value):
+    from mmro.config import TaskRow
+
+    with pytest.raises(ConfigError, match="max_new_tokens"):
+        TaskRow(name="t", lmms_eval="t", max_new_tokens=value)
+
+
 def test_unknown_placeholder_is_a_config_error(cfg):
     cfg.eval.harnesses["vlmevalkit"].command = "{python} --nope {not_a_field}"
     with pytest.raises(ConfigError, match="unknown placeholder"):
@@ -464,13 +499,49 @@ def test_model_path_is_the_verified_local_copy_once_resolved(cfg, tmp_path):
 # Judge requirement is per task and harness
 # ---------------------------------------------------------------------------
 def test_judge_free_task_needs_no_key(cfg, monkeypatch):
-    # lmms-eval scores mmmu_val by rule-based parsing, so an api judge with no
-    # key must not block it.
+    # A task/harness scored by rule-based parsing only (e.g. plain mmmu_val on
+    # lmms-eval) must not be blocked by an api judge with no key.
+    monkeypatch.delenv("MMRO_TEST_KEY", raising=False)
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    cfg.eval.task("mmmu_val").judge_free = ["lmms_eval"]
+    backend = get_backend_class("lmms_eval")(cfg)
+    assert backend.judge_problems(cfg.eval.task("mmmu_val")) == []
+
+
+def test_mmmu_reasoning_on_lmms_eval_requires_the_judge(cfg, monkeypatch):
+    # mmmu_val_reasoning re-checks zero-scored items with the LLM judge, so
+    # its lmms-eval run is no longer judge-free.
     monkeypatch.delenv("MMRO_TEST_KEY", raising=False)
     cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
     cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
     backend = get_backend_class("lmms_eval")(cfg)
-    assert backend.judge_problems(cfg.eval.task("mmmu_val")) == []
+    assert backend.judge_problems(cfg.eval.task("mmmu_val"))
+
+
+def test_reasoning_judge_env_is_enabled_with_model_and_key(cfg, monkeypatch):
+    # reasoning_utils.py reads these names, not MODEL_VERSION/OPENAI_API_KEY,
+    # and skips the judge unless USE_LLM_JUDGE is exactly "True".
+    cfg.eval.judge.backend, cfg.eval.judge.model = "api", "gpt-4o-mini"
+    cfg.eval.judge.api_key_env = "MMRO_TEST_KEY"
+    monkeypatch.setenv("MMRO_TEST_KEY", "sk-secret")
+    env = get_backend_class("lmms_eval")(cfg).judge_env()
+    assert env["USE_LLM_JUDGE"] == "True"
+    assert env["JUDGE_MODEL_NAME"] == "gpt-4o-mini"
+    assert env["JUDGE_API_KEY"] == "sk-secret"
+
+
+def test_no_judge_leaves_the_reasoning_judge_off(cfg):
+    cfg.eval.judge.backend, cfg.eval.judge.model = "none", None
+    assert "USE_LLM_JUDGE" not in get_backend_class("lmms_eval")(cfg).judge_env()
+
+
+def test_reasoning_acc_score_is_gated_but_format_score_is_not(cfg):
+    gate = check_gate(cfg, [
+        score(task="mmmu_val", harness="lmms_eval", metric="acc_score", value=57.0),
+        score(task="mmmu_val", harness="lmms_eval", metric="format_score", value=90.0),
+    ])
+    assert [g.metric for g in gate] == ["acc_score"]
 
 
 def test_judged_tasks_still_require_a_key(cfg, monkeypatch):
@@ -493,6 +564,7 @@ def test_judge_free_is_validated(cfg):
 
 def test_diagnose_skips_the_judge_note_for_judge_free_failures(cfg):
     cfg.eval.judge.backend, cfg.eval.judge.model = "none", None
+    cfg.eval.task("mmmu_val").judge_free = ["lmms_eval"]
     notes = " ".join(diagnose(cfg, check_gate(cfg, [score(task="mmmu_val", harness="lmms_eval", value=40.0)])))
     assert "judge.backend is 'none'" not in notes
 

@@ -44,13 +44,22 @@ class LMMSEvalBackend(HarnessBackend):
     name = "lmms_eval"
 
     def judge_env(self) -> dict[str, str]:
-        # lmms-eval takes its judge model and provider from the environment
-        # (MathVista reads MODEL_VERSION / API_TYPE), not from a CLI flag.
+        # lmms-eval takes its judge model and provider from the environment,
+        # not from a CLI flag -- and tasks disagree on the variable names:
+        # - MathVista reads MODEL_VERSION / API_TYPE (+ OPENAI_API_KEY);
+        # - the *_reasoning tasks (tasks/_task_utils/reasoning_utils.py) read
+        #   JUDGE_MODEL_NAME / JUDGE_API_KEY, and consult the judge at all only
+        #   when USE_LLM_JUDGE == "True" (default "False": rule-based only).
+        #   Even then it re-checks just the items rule-based matching scored 0.
         env = super().judge_env()
         judge = self.cfg.eval.judge
         if judge.backend != "none":
             env["MODEL_VERSION"] = str(judge.model)
             env.setdefault("API_TYPE", "openai")
+            env["JUDGE_MODEL_NAME"] = str(judge.model)
+            env["USE_LLM_JUDGE"] = "True"
+            if "OPENAI_API_KEY" in env:
+                env["JUDGE_API_KEY"] = env["OPENAI_API_KEY"]
         return env
 
     def run(self, model_name: str, task: TaskRow) -> list[ScoreRecord]:
